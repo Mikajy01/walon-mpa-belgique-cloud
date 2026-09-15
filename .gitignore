@@ -1,0 +1,19 @@
+# Environnement Python
+.venv/
+__pycache__/
+*.pyc
+
+# Cache HTTP (performance uniquement, PAS une source de vérité) —
+# reconstruit à chaque run, jamais commité (voir le plan : contrairement
+# à state/ et registry_data/, qui SONT la source de vérité et doivent
+# rester trackés).
+cache/
+
+# Logs d'exécution (régénérés à chaque run, pas commités — le fichier
+# de suivi qui compte réellement, cellules_a_revisiter.csv, est dans
+# registry_data/ et reste tracké).
+logs/
+
+# OS/éditeur
+.DS_Store
+Thumbs.db

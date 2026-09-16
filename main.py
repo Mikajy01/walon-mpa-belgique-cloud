@@ -19,7 +19,7 @@ from services.cache_service import HttpCache
 from services.cadastre_service import CadastreService
 from services.decouverte_service import decouvrir_parcelles
 from services.excel_service import (
-    charger_classeur, ecrire_identite, ecrire_ligne, feuille_principale, feuille_rup,
+    charger_classeur, ecrire_identite, ecrire_ligne, ecrire_rup, feuille_principale, feuille_rup,
     lire_capakeys_deja_ecrits, sauvegarder, trouver_premiere_ligne_vide,
 )
 from services.http_client import HttpClient
@@ -38,6 +38,7 @@ from services.wfs_natuur_service import WfsNatuurService
 from services.wfs_grondverschuiving_service import WfsGrondverschuivingService
 from services.wfs_grondwaterwinning_service import WfsGrondwaterwinningService
 from services.wfs_ovam_service import WfsOvamService
+from services.wfs_rup_service import WfsRupService
 from services.wfs_seveso_service import WfsSevesoService
 from services.wfs_steunzone_brownfield_service import WfsSteunzoneBrownfieldService
 from services.wfs_watertoets_service import WfsWatertoetsService
@@ -83,6 +84,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         WfsOvamService(http), WfsGrondverschuivingService(http), WfsGrondwaterwinningService(http),
         WfsAfstromingskaartService(http), WfsAdvieskaartService(http),
     )
+    rup = WfsRupService(http)
 
     state_dir = Path(args.state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -116,16 +118,24 @@ def main(argv: Optional[List[str]] = None) -> int:
                 numero=a.huisnummer, capakey=p.parcelle.reference, valeurs=valeurs,
             )
             if ws_rup is not None:
-                # Même ligne que la feuille principale -- identité seule,
-                # le reste (lien + texte RUP par niveau) est à compléter
-                # à la main par l'utilisateur (voir le plan, décision du
-                # 2026-09-16 : le bloc RUP détaillé de la feuille
-                # principale reçoit "/" partout, jamais de classement
-                # automatique construit).
+                # Même ligne que la feuille principale. Décision du
+                # 2026-09-16 : pas de classement dans les ~25 catégories
+                # détaillées (jamais construit, risque de classement
+                # faux -- voir le plan), mais on RAPPORTE directement ce
+                # que l'API donne déjà pour ce point précis (lien vers
+                # la fiche + nom du plan/zone), sans aucune supposition.
                 ecrire_identite(
                     ws_rup, row, commune=args.commune, code_postal=args.code_postal, rue=rue,
                     numero=a.huisnummer, capakey=p.parcelle.reference,
                 )
+                for niveau, methode in (
+                    ("region", rup.rup_region), ("province", rup.rup_province), ("commune", rup.rup_commune),
+                ):
+                    infos = methode(a.x, a.y)
+                    if not infos:
+                        continue
+                    texte = "; ".join(sorted({i.svnaam for i in infos if i.svnaam}))
+                    ecrire_rup(ws_rup, row, niveau, lien=infos[0].fichelink, texte=f"{infos[0].naam} — {texte}" if texte else infos[0].naam)
             sauvegarder(wb, excel_path)
             wb = charger_classeur(excel_path)
             ws = feuille_principale(wb)

@@ -96,6 +96,22 @@ def ecrire_identite(ws: Worksheet, row: int, *, commune: str, code_postal: str, 
     ws.cell(row=row, column=COL_NUMERO_CADASTRAL, value=capakey)
 
 
+# Colonnes (lien, texte) par niveau sur la feuille "RUP" — voir
+# wfs_rup_service.py, confirmé en direct sur la structure réelle de
+# cette feuille (F/G région, I/J province, L/M commune).
+_RUP_COLONNES = {"region": (6, 7), "province": (9, 10), "commune": (12, 13)}
+
+
+def ecrire_rup(ws_rup: Worksheet, row: int, niveau: str, *, lien: str, texte: str) -> None:
+    """Écrit le lien + texte libre RUP pour `niveau`
+    ("region"/"province"/"commune") à la ligne `row` de la feuille RUP —
+    jamais de classement, juste ce que l'API a réellement renvoyé pour
+    ce point (voir `services/wfs_rup_service.py::InfoRup`)."""
+    col_lien, col_texte = _RUP_COLONNES[niveau]
+    ws_rup.cell(row=row, column=col_lien, value=lien)
+    ws_rup.cell(row=row, column=col_texte, value=texte)
+
+
 def ecrire_ligne(
     ws: Worksheet, row: int, *, commune: str, code_postal: str, rue: str,
     numero: str, capakey: str, valeurs: Dict[str, str],

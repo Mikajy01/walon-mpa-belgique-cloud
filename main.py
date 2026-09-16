@@ -60,7 +60,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--logs-dir", default=str(config.BASE_DIR / "logs"))
     parser.add_argument("--debug", action="store_true")
     parser.add_argument(
-        "--budget-heures", type=float, default=5.5,
+        "--budget-heures", type=float, default=5.0,
         help=(
             "Budget de temps interne (heures) -- au-delà, le run s'arrête "
             "PROPREMENT (sauvegarde déjà faite à chaque parcelle) avant "
@@ -68,8 +68,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
             "force, ce qui sauterait l'étape de commit. Incident réel "
             "confirmé le 2026-09-16 : un run de 712 adresses annulé après "
             "3h par le timeout du workflow, aucune sauvegarde poussée "
-            "(voir traiter_commune.yml). Même principe que côté France "
-            "(--budget-heures, défaut identique 5.5h)."
+            "(voir traiter_commune.yml). Défaut (5h) choisi pour garder "
+            "30 min de marge sous le timeout-minutes du workflow (5h30) --"
+            " ne JAMAIS remonter l'un sans revérifier l'autre."
         ),
     )
     return parser.parse_args(argv)

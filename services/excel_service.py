@@ -1,13 +1,21 @@
 """Lecture/écriture du classeur Excel flamand — BEAUCOUP plus simple que
-côté France (`services/excel_service.py` du repo France) : pas de
-registre de colonnes dynamique par icône (le gabarit vu n'a aucune image
-ancrée, `models/colonnes_be.py` donne un mapping FIXE lettre->rôle),
-donc pas de `scan_layout` à refaire à chaque fichier.
+côté France : pas de registre de colonnes dynamique par icône (le
+gabarit n'a aucune image ancrée, `models/colonnes_be.py` donne un
+mapping FIXE lettre->rôle), donc pas de `scan_layout` à refaire à
+chaque fichier.
 
-Structure confirmée en direct sur le gabarit ("Formation Geopunt
-1.xlsx", feuille "Mesen") : ligne 2 = en-têtes identité (A->E), ligne 3
-= catégorie (dynamique), ligne 4 = palier, ligne 5+ = données. Une
-seule feuille, aucune image."""
+Structure confirmée en direct sur le gabarit officiel réel ("Formation
+Geopunt 1 1.xlsx", reçu le 2026-09-16, DEUX feuilles) :
+- Feuille principale (nom arbitraire, ex. "Feuille"/"Mesen" selon le
+  fichier -- jamais fixe, toujours prise par POSITION, `wb.worksheets[0]`)
+  : ligne 2 = en-têtes identité (A->E), ligne 3 = catégorie (dynamique),
+  ligne 4 = palier, ligne 5+ = données.
+- Feuille **"RUP"** (nom stable, cherché par nom) : même structure
+  d'identité (A->E), mais seulement 6 colonnes utiles (F/G, I/J, L/M --
+  lien + texte libre par niveau région/province/commune), à compléter
+  MANUELLEMENT par l'utilisateur (voir le plan : le bloc RUP détaillé
+  de la feuille principale reçoit "/" partout, jamais de classement
+  automatique construit)."""
 
 from __future__ import annotations
 
@@ -16,6 +24,7 @@ from typing import Dict, Optional, Set
 
 import openpyxl
 from openpyxl.utils import column_index_from_string
+from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 from models.colonnes_be import COLONNES_BE
@@ -32,10 +41,29 @@ COL_RUE = 3  # C
 COL_NUMERO = 4  # D
 COL_NUMERO_CADASTRAL = 5  # E
 
+NOM_FEUILLE_RUP = "RUP"
+
+
+def charger_classeur(excel_path: Path) -> Workbook:
+    return openpyxl.load_workbook(excel_path)
+
+
+def feuille_principale(wb: Workbook) -> Worksheet:
+    """Toujours la PREMIÈRE feuille par position -- son nom varie d'un
+    fichier à l'autre (vu "Mesen" puis "Feuille" sur deux exemplaires du
+    même gabarit), jamais fiable à chercher par nom."""
+    return wb.worksheets[0]
+
+
+def feuille_rup(wb: Workbook) -> Optional[Worksheet]:
+    """La feuille "RUP" (nom stable) si le classeur en a une -- `None`
+    sur un ancien gabarit à une seule feuille, jamais deviné."""
+    return wb[NOM_FEUILLE_RUP] if NOM_FEUILLE_RUP in wb.sheetnames else None
+
 
 def charger_feuille(excel_path: Path) -> Worksheet:
-    wb = openpyxl.load_workbook(excel_path)
-    return wb.active
+    """Compatibilité : renvoie directement la feuille principale."""
+    return feuille_principale(charger_classeur(excel_path))
 
 
 def trouver_premiere_ligne_vide(ws: Worksheet) -> int:
@@ -60,21 +88,26 @@ def lire_capakeys_deja_ecrits(ws: Worksheet) -> Set[str]:
     return capakeys
 
 
-def ecrire_ligne(
-    ws: Worksheet, row: int, *, commune: str, code_postal: str, rue: str,
-    numero: str, capakey: str, valeurs: Dict[str, str],
-) -> None:
-    """Écrit l'identité (A->E) puis les valeurs dynamiques (`valeurs` :
-    lettre de colonne Excel -> "O"/"N"/texte) à la ligne `row`. Ne
-    valide PAS que chaque lettre de `valeurs` existe dans
-    `COLONNES_BE` (les appelants passent déjà des lettres résolues via
-    les services WFS) -- journalise un avertissement plutôt que planter
-    si une lettre inattendue apparaît, jamais deviné où l'écrire."""
+def ecrire_identite(ws: Worksheet, row: int, *, commune: str, code_postal: str, rue: str, numero: str, capakey: str) -> None:
     ws.cell(row=row, column=COL_COMMUNE, value=commune)
     ws.cell(row=row, column=COL_CODE_POSTAL, value=code_postal)
     ws.cell(row=row, column=COL_RUE, value=rue)
     ws.cell(row=row, column=COL_NUMERO, value=numero)
     ws.cell(row=row, column=COL_NUMERO_CADASTRAL, value=capakey)
+
+
+def ecrire_ligne(
+    ws: Worksheet, row: int, *, commune: str, code_postal: str, rue: str,
+    numero: str, capakey: str, valeurs: Dict[str, str],
+) -> None:
+    """Écrit l'identité (A->E) puis les valeurs dynamiques (`valeurs` :
+    lettre de colonne Excel -> "O"/"N"/"/"/texte) à la ligne `row` de la
+    feuille PRINCIPALE. Ne valide PAS que chaque lettre de `valeurs`
+    existe dans `COLONNES_BE` (les appelants passent déjà des lettres
+    résolues via les services WFS) -- journalise un avertissement
+    plutôt que planter si une lettre inattendue apparaît, jamais deviné
+    où l'écrire."""
+    ecrire_identite(ws, row, commune=commune, code_postal=code_postal, rue=rue, numero=numero, capakey=capakey)
 
     for lettre, valeur in valeurs.items():
         if lettre not in COLONNES_BE:
@@ -87,5 +120,5 @@ def ecrire_ligne(
         ws.cell(row=row, column=idx, value=valeur)
 
 
-def sauvegarder(ws: Worksheet, excel_path: Path) -> None:
-    ws.parent.save(excel_path)
+def sauvegarder(wb: Workbook, excel_path: Path) -> None:
+    wb.save(excel_path)

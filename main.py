@@ -19,8 +19,8 @@ from services.cache_service import HttpCache
 from services.cadastre_service import CadastreService
 from services.decouverte_service import decouvrir_parcelles
 from services.excel_service import (
-    FIRST_DATA_ROW, charger_feuille, ecrire_ligne, lire_capakeys_deja_ecrits,
-    sauvegarder, trouver_premiere_ligne_vide,
+    charger_classeur, ecrire_identite, ecrire_ligne, feuille_principale, feuille_rup,
+    lire_capakeys_deja_ecrits, sauvegarder, trouver_premiere_ligne_vide,
 )
 from services.http_client import HttpClient
 from services.resolveur_service import ResolveurBE
@@ -96,7 +96,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     n_total_ecrites = 0
     for rue in rues:
-        ws = charger_feuille(excel_path)
+        wb = charger_classeur(excel_path)
+        ws = feuille_principale(wb)
+        ws_rup = feuille_rup(wb)
         deja_ecrits = lire_capakeys_deja_ecrits(ws)
         _logger.info("Découverte de '%s' (%s)...", rue, args.commune)
         parcelles = decouvrir_parcelles(args.commune, rue, adressen, cadastre)
@@ -113,8 +115,21 @@ def main(argv: Optional[List[str]] = None) -> int:
                 ws, row, commune=args.commune, code_postal=args.code_postal, rue=rue,
                 numero=a.huisnummer, capakey=p.parcelle.reference, valeurs=valeurs,
             )
-            sauvegarder(ws, excel_path)
-            ws = charger_feuille(excel_path)
+            if ws_rup is not None:
+                # Même ligne que la feuille principale -- identité seule,
+                # le reste (lien + texte RUP par niveau) est à compléter
+                # à la main par l'utilisateur (voir le plan, décision du
+                # 2026-09-16 : le bloc RUP détaillé de la feuille
+                # principale reçoit "/" partout, jamais de classement
+                # automatique construit).
+                ecrire_identite(
+                    ws_rup, row, commune=args.commune, code_postal=args.code_postal, rue=rue,
+                    numero=a.huisnummer, capakey=p.parcelle.reference,
+                )
+            sauvegarder(wb, excel_path)
+            wb = charger_classeur(excel_path)
+            ws = feuille_principale(wb)
+            ws_rup = feuille_rup(wb)
             n_ecrites_rue += 1
             n_total_ecrites += 1
 

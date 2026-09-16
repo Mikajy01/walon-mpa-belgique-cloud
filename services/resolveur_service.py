@@ -224,4 +224,16 @@ class ResolveurBE:
         if v is not None:
             valeurs["EM"] = v
 
+        # -- RUP (AF->DB, 75 colonnes) -----------------------------------
+        # Décision explicite de l'utilisateur (2026-09-16) : le bloc RUP
+        # détaillé de la feuille principale n'est PAS rempli par le
+        # pipeline (classement fiable non construit, voir le plan) --
+        # écrit "/" partout, même convention que le gabarit officiel pour
+        # une cellule non applicable (voir ligne 4 des en-têtes). Le
+        # vrai remplissage RUP se fait à la main sur la feuille "RUP"
+        # dédiée (lien + texte libre par niveau), pas ici.
+        for lettre, info in COLONNES_BE.items():
+            if info["groupe"] in ("rup_region", "rup_province", "rup_commune"):
+                valeurs[lettre] = "/"
+
         return valeurs

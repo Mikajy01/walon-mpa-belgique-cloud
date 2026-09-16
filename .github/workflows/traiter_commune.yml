@@ -21,10 +21,10 @@ on:
         type: boolean
         default: false
       budget_heures:
-        description: "Budget de temps interne (heures) -- le run s'arrête PROPREMENT (sauvegarde déjà faite, commit garanti) avant cette limite plutôt que de risquer que GitHub tue le job de force. Doit rester NETTEMENT sous timeout-minutes (330 min = 5h30) -- garder au moins 30 min d'écart."
+        description: "Budget de temps interne (heures) -- le run s'arrête PROPREMENT (sauvegarde déjà faite, commit garanti) avant cette limite plutôt que de risquer que GitHub tue le job de force. Doit rester NETTEMENT sous timeout-minutes (360 min = 6h, le plafond dur GitHub) -- garder au moins 30 min d'écart."
         required: false
         type: string
-        default: "5"
+        default: "5.5"
 
 # Nécessaire pour committer l'état (Excel) à la fin du run -- l'Excel
 # EST la source de vérité de progression, il doit être commité pour que
@@ -52,14 +52,15 @@ jobs:
     # "Lancer le traitement" ne protège PAS contre une annulation au
     # niveau du job). Résultat : 3h de traitement perdues, rien commité.
     # Double garde-fou maintenant en place : --budget-heures (main.py,
-    # défaut 5h -- voir plus bas) s'arrête proprement AVANT cette limite
-    # externe de 5h30, qui doit TOUJOURS rester strictement au-dessus du
-    # budget interne (30 min de marge ici pour checkout/setup/pip/commit/
-    # push) -- sinon on retombe exactement dans l'incident du
-    # 2026-09-16 : les deux limites tombant au même moment, GitHub peut
-    # tuer le job de force avant que le script ait fini de s'arrêter
-    # proprement.
-    timeout-minutes: 330
+    # défaut 5h30 -- voir plus bas) s'arrête proprement AVANT cette
+    # limite externe de 6h (360 min = plafond DUR des runners hébergés
+    # GitHub, le maximum possible ici), qui doit TOUJOURS rester
+    # strictement au-dessus du budget interne (30 min de marge pour
+    # checkout/setup/pip/cache/commit/push) -- sinon on retombe
+    # exactement dans l'incident du 2026-09-16 : les deux limites
+    # tombant au même moment, GitHub peut tuer le job de force avant que
+    # le script ait fini de s'arrêter proprement.
+    timeout-minutes: 360
     steps:
       - name: Checkout
         uses: actions/checkout@v4

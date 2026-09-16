@@ -33,6 +33,7 @@ from services.wfs_landinrichting_woningbouw_service import (
 )
 from services.wfs_landschap_service import WfsLandschapService
 from services.wfs_natuur_service import WfsNatuurService
+from services.wfs_grondverschuiving_service import WfsGrondverschuivingService
 from services.wfs_ovam_service import WfsOvamService
 from services.wfs_seveso_service import WfsSevesoService
 from services.wfs_steunzone_brownfield_service import WfsSteunzoneBrownfieldService
@@ -76,7 +77,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         WfsEconomieService(http), WfsLandinrichtingService(http), WfsWoningbouwService(http),
         WfsNatuurinrichtingService(http), WfsLandschapService(http), WfsNatuurService(http),
         WfsBodemService(http), WfsSevesoService(http), WfsSteunzoneBrownfieldService(http),
-        WfsOvamService(http),
+        WfsOvamService(http), WfsGrondverschuivingService(http),
     )
 
     state_dir = Path(args.state_dir)

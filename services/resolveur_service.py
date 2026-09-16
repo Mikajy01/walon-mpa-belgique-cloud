@@ -27,6 +27,7 @@ from services.wfs_landinrichting_woningbouw_service import (
 from services.wfs_landschap_service import WfsLandschapService
 from services.wfs_natuur_service import WfsNatuurService
 from services.wfs_bodem_service import WfsBodemService
+from services.wfs_ovam_service import WfsOvamService
 from services.wfs_seveso_service import WfsSevesoService
 from services.wfs_steunzone_brownfield_service import WfsSteunzoneBrownfieldService
 from models.colonnes_be import COLONNES_BE
@@ -43,7 +44,7 @@ class ResolveurBE:
         landinrichting: WfsLandinrichtingService, woningbouw: WfsWoningbouwService,
         natuurinrichting: WfsNatuurinrichtingService, landschap: WfsLandschapService,
         natuur: WfsNatuurService, bodem: WfsBodemService, seveso: WfsSevesoService,
-        steunzone_brownfield: WfsSteunzoneBrownfieldService,
+        steunzone_brownfield: WfsSteunzoneBrownfieldService, ovam: WfsOvamService,
     ) -> None:
         self._gewestplan = gewestplan
         self._bruit = bruit
@@ -57,6 +58,7 @@ class ResolveurBE:
         self._bodem = bodem
         self._seveso = seveso
         self._steunzone_brownfield = steunzone_brownfield
+        self._ovam = ovam
 
     def resoudre(self, x: float, y: float) -> Dict[str, str]:
         """`x`/`y` : position (Lambert 72, EPSG:31370) — la position de
@@ -184,5 +186,10 @@ class ResolveurBE:
             v = methode(x, y)
             if v is not None:
                 valeurs[lettre] = v
+
+        # -- OVAM (pollution des sols) -------------------------------
+        colonne_ovam = self._ovam.colonne_bodemverontreiniging(x, y)
+        if colonne_ovam:
+            valeurs[colonne_ovam] = "O"
 
         return valeurs

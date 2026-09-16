@@ -1,0 +1,136 @@
+name: Traiter une commune
+
+on:
+  workflow_dispatch:
+    inputs:
+      commune:
+        description: "Nom de la commune (ex: Sint-Truiden)"
+        required: true
+        type: string
+      code_postal:
+        description: "Code postal (ex: 3800)"
+        required: true
+        type: string
+      rues:
+        description: "Rues à traiter, séparées par des virgules (ex: Gildestraat, Gootstraat). Contrairement à la France, TOUJOURS obligatoire ici -- pas de découverte automatique de toute la commune (voir main.py)."
+        required: true
+        type: string
+      debug:
+        description: "Logs détaillés (DEBUG) -- utile pour diagnostiquer un service WFS en panne."
+        required: false
+        type: boolean
+        default: false
+
+# Nécessaire pour committer l'état (Excel) à la fin du run -- l'Excel
+# EST la source de vérité de progression, il doit être commité pour que
+# le run suivant puisse reprendre dessus (même principe que côté
+# walon-map-france-cloud).
+permissions:
+  contents: write
+
+jobs:
+  traiter:
+    runs-on: ubuntu-latest
+    # Empêche deux runs sur la MÊME commune de tourner en parallèle -- le
+    # step de commit final touche le même fichier
+    # state/{code_postal}_{commune}.xlsx pour les deux, un vrai conflit
+    # de fusion sur un binaire n'étant pas auto-résolvable. Des communes
+    # différentes restent traitées en parallèle sans souci (fichiers
+    # distincts).
+    concurrency:
+      group: traiter-commune-${{ inputs.commune }}-${{ inputs.code_postal }}
+      cancel-in-progress: false
+    # Pas de mécanisme de budget de temps interne côté Belgique
+    # (contrairement à --budget-heures côté France) -- une liste de rues
+    # est toujours fournie explicitement par l'utilisateur, jamais une
+    # commune entière à découvrir, donc un run reste normalement court.
+    # Garde-fou dur généreux quand même, au cas où une rue contienne
+    # beaucoup plus de parcelles que prévu.
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+
+      # Cache HTTP : PERFORMANCE uniquement, jamais une source de vérité
+      # (voir .gitignore) -- accélère les runs répétés sur la même
+      # commune, sans jamais être commité dans le repo.
+      - name: Restaurer le cache HTTP
+        uses: actions/cache@v4
+        with:
+          path: cache
+          key: http-cache-${{ inputs.commune }}-${{ github.run_id }}
+          restore-keys: |
+            http-cache-${{ inputs.commune }}-
+
+      # `continue-on-error` : chaque parcelle est sauvegardée
+      # individuellement dans l'Excel dès qu'elle est résolue (voir
+      # main.py -- `sauvegarder(wb, excel_path)` après CHAQUE parcelle,
+      # rechargement immédiat), donc même un arrêt/crash en plein milieu
+      # laisse un fichier cohérent sur disque -- toujours sûr à committer
+      # tel quel, peu importe la cause de l'arrêt.
+      - name: Lancer le traitement
+        id: traitement
+        continue-on-error: true
+        run: |
+          python main.py \
+            --commune "${{ inputs.commune }}" \
+            --code-postal "${{ inputs.code_postal }}" \
+            --rues "${{ inputs.rues }}" \
+            ${{ inputs.debug && '--debug' || '' }}
+
+      - name: Signaler une erreur ou un arrêt inattendu
+        if: steps.traitement.outcome == 'failure'
+        run: echo "::warning::Le traitement de '${{ inputs.commune }}' s'est arrêté avant la fin normale (voir les logs ci-dessus). L'état déjà calculé est commité normalement (chaque parcelle est sauvegardée dès qu'elle est résolue) ; relance le workflow pour reprendre là où ça s'est arrêté."
+
+      # `git push` seul, sans re-synchro avec origin, se fait rejeter dès
+      # que master a avancé depuis le checkout (ex: un push de code
+      # pendant le run, un run précédent pas encore mergé) -- même
+      # incident déjà vécu côté walon-map-france-cloud. `git fetch` +
+      # `git rebase` avant de pousser rejoue notre commit par-dessus les
+      # commits distants -- jamais un simple `push --force`, qui
+      # écraserait le travail distant au lieu de le préserver.
+      #
+      # DEUX cas distincts pour l'échec du rebase :
+      #   - Rejet SIMPLE (pas de conflit, juste un retard de
+      #     synchronisation) : le rebase réussit, on retente le push --
+      #     boucle de 3 tentatives pour couvrir le cas où un AUTRE push
+      #     arrive pendant cette resynchronisation elle-même.
+      #   - CONFLIT réel (`git rebase` échoue, contenu qui se recouvre) :
+      #     seul signe possible d'un DEUXIÈME run sur la MÊME commune
+      #     ayant tourné en parallèle malgré le groupe de concurrence
+      #     ci-dessus. Aucune tentative de fusion automatique sur un
+      #     fichier binaire (Excel) -- un openpyxl mal fusionné peut
+      #     corrompre silencieusement le fichier. On abandonne le rebase
+      #     proprement (`--abort`) et on échoue tout de suite.
+      - name: Committer l'état (Excel) si modifié
+        run: |
+          git config user.name "walon-mpa-belgique-cloud bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add state/
+          if git diff --staged --quiet; then
+            echo "Rien à committer."
+            exit 0
+          fi
+          git commit -m "Traitement automatique : ${{ inputs.commune }} (${{ inputs.code_postal }}) -- ${{ inputs.rues }}"
+          for tentative in 1 2 3; do
+            if git push; then
+              exit 0
+            fi
+            echo "Push rejeté (tentative $tentative/3) -- resynchronisation avec origin/master avant nouvel essai."
+            git fetch origin master
+            if ! git rebase origin/master; then
+              echo "::error::Conflit de fusion réel sur state/ (pas juste un retard de synchronisation) -- probablement un DEUXIÈME run sur la MÊME commune ayant tourné en parallèle malgré le groupe de concurrence. Aucune fusion automatique tentée sur un fichier binaire. État de CE run non commité (perdu) ; relancer le workflow pour reprendre depuis l'état déjà sur origin/master."
+              git rebase --abort
+              exit 1
+            fi
+          done
+          echo "::error::Échec du push après 3 tentatives (rejets répétés sans conflit) -- état local NON perdu sur ce runner (voir logs), mais non commité côté dépôt. Relancer le workflow."
+          exit 1

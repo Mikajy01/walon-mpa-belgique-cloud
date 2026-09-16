@@ -31,7 +31,7 @@ from services.wfs_advieskaart_service import WfsAdvieskaartService
 from services.wfs_afstromingskaart_service import WfsAfstromingskaartService
 from services.wfs_gewestplan_service import WfsGewestplanService
 from services.wfs_landinrichting_woningbouw_service import (
-    WfsLandinrichtingService, WfsNatuurinrichtingService, WfsWoningbouwService,
+    WfsLandinrichtingService, WfsNatuurinrichtingService, WfsWoningbouwService, WfsRuilverkavelingService,
 )
 from services.wfs_landschap_service import WfsLandschapService
 from services.wfs_natuur_service import WfsNatuurService
@@ -82,7 +82,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         WfsNatuurinrichtingService(http), WfsLandschapService(http), WfsNatuurService(http),
         WfsBodemService(http), WfsSevesoService(http), WfsSteunzoneBrownfieldService(http),
         WfsOvamService(http), WfsGrondverschuivingService(http), WfsGrondwaterwinningService(http),
-        WfsAfstromingskaartService(http), WfsAdvieskaartService(http),
+        WfsAfstromingskaartService(http), WfsAdvieskaartService(http), WfsRuilverkavelingService(http),
     )
     rup = WfsRupService(http)
 

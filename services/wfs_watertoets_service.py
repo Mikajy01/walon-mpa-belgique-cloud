@@ -34,8 +34,44 @@ libellé du gabarit ("IWB OeverzoneI"/"WB Overstromingsgebied", scores
 0.96/0.98, voir `utils/text_normalize.py`) : le même registre RVV que
 `wfs_natuur_service.py`, EPSG:31370).
 
-Colonnes DE, DV, DY, EA, EB — PAS encore de source confirmée (voir le
-plan)."""
+**Couche ArcGIS REST (pas WFS/WMS -- `query` natif JSON)**
+(`inspirepub.waterinfo.be/arcgis/rest/services/waterinfo/Watertoetskaarten/
+MapServer/6`, trouvée en explorant l'arborescence COMPLÈTE des services de
+cet host via `/arcgis/rest/services/<dossier>?f=json`, dossier par
+dossier -- la couche `VMMWatertoets/wms` initialement supposée pour DV
+s'est révélée injoignable/mal enregistrée derrière le proxy
+`geo.api.vlaanderen.be`, HTTP 400 générique ArcGIS quel que soit le
+paramètre envoyé, y compris sans AUCUN paramètre -- signe que le WMS
+n'est simplement pas activé sur ce service précis, pas un problème de
+requête) : couche "ROG 2017" (id 6, "Recent Overstroomde Gebieden",
+14552 features réelles sur toute la Flandre, champs `ROGID`/`TITEL`/
+`GEBIED`/`DATUMSTART` confirmés en direct, ex. "Inventarisatie van de
+overstromingen in de Demervallei van september 1998" trouvé à
+Sint-Truiden) → colonne DY, existence seule (`query?geometry=...&
+geometryType=esriGeometryPoint&inSR=31370&spatialRel=
+esriSpatialRelIntersects&distance=<marge>&units=esriSRUnit_Meter`).
+
+Colonnes DE, DV, EB — recherche approfondie mais TOUJOURS pas de source
+confirmée : DE ("Beheergebieden beheerovereenkomst waterkwaliteit") a
+une fiche officielle `metadata.vlaanderen.be` (uuid
+`0b5002ba-b14c-436b-afb3-9db5bff8fb77`, récupérée en direct via
+`/srv/api/records/<uuid>/formatters/xml`, PAS via une réponse
+synthétisée par recherche web) qui ne liste AUCUN protocole WFS/WMS --
+seulement un produit téléchargeable (`download.vlaanderen.be`, id 4180).
+DV ("Grondwaterstromingsgevoelige gebieden") et EB ("Infiltratiegevoelige
+bodems") apparaissent encore dans les DESCRIPTIONS de 2 services
+`inspirepub.waterinfo.be` (`afstroomgebieden_watertoets`,
+`waterinfo/Watertoetskaarten`) mais AUCUNE couche correspondante n'existe
+réellement dans leur liste de couches (vérifié couche par couche, id par
+id -- 404 "Layer not found" sur tous les ids non listés) : cohérent avec
+l'annonce officielle de la "vernieuwde watertoets" du 1/1/2023
+(integraalwaterbeleid.be) qui a consolidé les anciens critères
+individuels dans une "Advieskaart watertoets" unique (déjà colonne EM,
+`wfs_advieskaart_service.py`) -- dont le schéma de champs réel
+(`CAPAKEY`/`Adviesinst`/`VMM`/`DVW`/`haven`/`MDK`/`penw`) confirme
+l'absence de toute décomposition par critère individuel. Probable
+retrait définitif de ces 2 critères comme couches publiques
+individuelles, pas une simple couche non trouvée."""
 
 from __future__ import annotations
 
@@ -52,6 +88,10 @@ _WMS_INFORMATIEPLICHT_BASE = "https://inspirepub.waterinfo.be/arcgis/services/in
 _NOG_WFS_BASE = "https://geo.api.vlaanderen.be/NOG/wfs"
 _OGOZ_WFS_BASE = "https://geo.api.vlaanderen.be/OGOZ/wfs"
 _RVV_WFS_BASE = "https://geo.api.vlaanderen.be/RVV/wfs"
+_ROG_ARCGIS_QUERY = (
+    "https://inspirepub.waterinfo.be/arcgis/rest/services/waterinfo/"
+    "Watertoetskaarten/MapServer/6/query"
+)
 
 
 class WfsWatertoetsService:
@@ -195,3 +235,24 @@ class WfsWatertoetsService:
         """Colonnes DN→DQ (palier de probabilité depuis la mer)."""
         gridcode = self._gridcode_wms("overstromingsgevoelige_gebieden_vanuit_de_zee", x, y)
         return self._colonne_palier(gridcode, ("DN", "DO", "DP", "DQ"))
+
+    def recent_overstroomd(self, x: float, y: float, marge_m: float = 5.0) -> Optional[str]:
+        """"O"/"N" -- colonne DY. Requête ArcGIS REST native (`query`,
+        JSON) sur la couche "ROG 2017", PAS un WFS/WMS classique -- voir
+        le docstring du module. `distance`/`units` remplacent le motif
+        BBOX habituel (plus simple pour un point + tolérance sur cette
+        API précise)."""
+        params = {
+            "geometry": f"{x},{y}", "geometryType": "esriGeometryPoint", "inSR": "31370",
+            "spatialRel": "esriSpatialRelIntersects", "distance": marge_m, "units": "esriSRUnit_Meter",
+            "returnGeometry": "false", "returnCountOnly": "true", "f": "json",
+        }
+        try:
+            data = self._http.get_json(_ROG_ARCGIS_QUERY, params, service_key="watertoets_arcgis")
+        except Exception as exc:  # noqa: BLE001 — une couche indisponible ne doit jamais faire échouer tout le traitement de la parcelle
+            _logger.warning("Couche 'ROG 2017' indisponible (x=%s, y=%s) : %s", x, y, exc)
+            return None
+        if not isinstance(data, dict) or "count" not in data:
+            _logger.warning("Couche 'ROG 2017' (x=%s, y=%s) : réponse sans 'count' exploitable : %s", x, y, data)
+            return None
+        return "O" if data["count"] > 0 else "N"

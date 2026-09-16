@@ -18,6 +18,17 @@ France) :
   EZ ("Natuurinrichting"), pas trouvée dans le service Landinrichting
   dédié malgré son nom proche.
 
+- `RVV/wfs`, couche `RvvRvkUkw` ("Rvk" = Ruilverkaveling, "Ukw" = Uit
+  Kracht van Wet) → colonne FA "Ruilverkaveling (Ruilverkaveling van
+  landeigendommen uit kracht van wet)" — correspondance EXACTE et non
+  ambiguë avec le libellé complet du gabarit (confirmé en direct :
+  champs `CASEKEY`/`BGUNST`="Vlaamse Landmaatschappij"/`NUMAC`, données
+  récentes jusqu'à fin 2025), résolvant l'ambiguïté mentionnée plus haut
+  entre `RvvLandinrpl`/`Hvk` -- ce n'était ni l'un ni l'autre. La couche
+  sœur `RvvRvkGiw` ("Grote Infrastructuurwerken", un autre mécanisme
+  légal) existe aussi mais N'EST PAS interrogée ici : le libellé du
+  gabarit précise explicitement "uit kracht van wet" seulement.
+
 - `WoningbWoonvernieuwing/wfs` — 2 couches confirmées en direct,
   correspondance directe et sans ambiguïté avec GF/GG.
 
@@ -97,6 +108,15 @@ class WfsNatuurinrichtingService(_ServiceExistenceWfs):
     def natuurinrichting(self, x: float, y: float) -> Optional[str]:
         """Colonne EZ."""
         return self._existe("Rvvnir", x, y)
+
+
+class WfsRuilverkavelingService(_ServiceExistenceWfs):
+    def __init__(self, http: HttpClient) -> None:
+        super().__init__(http, _RVV_BASE, "RVV", "ruilverkaveling_be")
+
+    def ruilverkaveling_uit_kracht_van_wet(self, x: float, y: float) -> Optional[str]:
+        """Colonne FA."""
+        return self._existe("RvvRvkUkw", x, y)
 
 
 class WfsWoningbouwService(_ServiceExistenceWfs):

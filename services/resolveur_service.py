@@ -1,6 +1,9 @@
-"""Orchestration : résout TOUTES les colonnes confirmées (84/184, voir
-le plan) pour un point donné (position d'adresse, Lambert 72) en
-appelant chaque service thématique déjà construit et vérifié.
+"""Orchestration : résout TOUTES les colonnes confirmées (voir le plan --
+177/184 avec le bloc RUP "/" inclus, DY/FA/FD ajoutés le 2026-09-16 ;
+seules DE/DV/EB/FE restent sans source confirmée, voir le docstring de
+`wfs_watertoets_service.py`/`wfs_natuur_service.py`) pour un point donné
+(position d'adresse, Lambert 72) en appelant chaque service thématique
+déjà construit et vérifié.
 
 Principe de sortie : `Dict[str, str]` lettre de colonne Excel -> valeur
 ("O"/"N"/texte). Seules les valeurs RÉELLEMENT confirmées sont incluses
@@ -24,7 +27,7 @@ from services.wfs_bruit_service import WfsBruitService
 from services.wfs_watertoets_service import WfsWatertoetsService
 from services.wfs_economie_service import WfsEconomieService
 from services.wfs_landinrichting_woningbouw_service import (
-    WfsLandinrichtingService, WfsWoningbouwService, WfsNatuurinrichtingService,
+    WfsLandinrichtingService, WfsWoningbouwService, WfsNatuurinrichtingService, WfsRuilverkavelingService,
 )
 from services.wfs_landschap_service import WfsLandschapService
 from services.wfs_natuur_service import WfsNatuurService
@@ -52,6 +55,7 @@ class ResolveurBE:
         grondverschuiving: WfsGrondverschuivingService,
         grondwaterwinning: WfsGrondwaterwinningService,
         afstromingskaart: WfsAfstromingskaartService, advieskaart: WfsAdvieskaartService,
+        ruilverkaveling: WfsRuilverkavelingService,
     ) -> None:
         self._gewestplan = gewestplan
         self._bruit = bruit
@@ -70,6 +74,7 @@ class ResolveurBE:
         self._grondwaterwinning = grondwaterwinning
         self._afstromingskaart = afstromingskaart
         self._advieskaart = advieskaart
+        self._ruilverkaveling = ruilverkaveling
 
     def resoudre(self, x: float, y: float) -> Dict[str, str]:
         """`x`/`y` : position (Lambert 72, EPSG:31370) — la position de
@@ -130,6 +135,10 @@ class ResolveurBE:
             if colonne:
                 valeurs[colonne] = "O"
 
+        v = self._watertoets.recent_overstroomd(x, y)
+        if v is not None:
+            valeurs["DY"] = v
+
         # -- Économie (EN valeur brute + EO->ER existence) ---------------
         aangeboden = self._economie.aangeboden_perceel(x, y)
         if aangeboden is not None:
@@ -148,6 +157,7 @@ class ResolveurBE:
             ("EX", self._landinrichting.vastgesteld_landinrichtingsproject),
             ("EY", self._landinrichting.landinrichtingsplan),
             ("EZ", self._natuurinrichting.natuurinrichting),
+            ("FA", self._ruilverkaveling.ruilverkaveling_uit_kracht_van_wet),
             ("GF", self._woningbouw.woningbouwgebied),
             ("GG", self._woningbouw.woonvernieuwingsgebied),
         ):
@@ -168,6 +178,7 @@ class ResolveurBE:
             ("FG", self._natuur.duinendecreet), ("FH", self._natuur.ven),
             ("FI", self._natuur.habitatrichtlijngebied), ("FJ", self._natuur.vogelrichtlijngebied),
             ("FF", self._natuur.erkend_natuurreservaat),
+            ("FD", self._natuur.beheergebied_natura2000_soorten),
         ):
             v = methode(x, y)
             if v is not None:

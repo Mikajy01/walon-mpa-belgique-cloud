@@ -18,8 +18,19 @@ recoupe plusieurs types de zones protégées) :
 - `RVV:Rvvnr` (réserves naturelles), champ `TYPE`="ENR" (Erkend
   NatuurReservaat) → colonne FF "Erkende Natuurreservaten".
 
-Colonnes FD (Natura 2000 Habitatkaart/Beheergebieden Natura
-2000-soorten) et FE (Bosreservaten) — pas encore de couche confirmée."""
+**Host Mercator, namespace `am` (PAS EPSG:3812 comme `ps:ps_ven`/`ps:ps_duin`
+-- confirmé en direct via le `srsName` réel de la géométrie renvoyée,
+EPSG:31370, donc bbox construite directement à partir de x/y Lambert 72
+SANS reprojection)** :
+- `am:am_behgebsoortenbescherming` ("Beheergebieden soortenbescherming",
+  608 features réelles sur toute la Flandre, champs `naam`/`doelsoort`/
+  `numac` confirmés en direct) → colonne FD "Beheergebieden Natura
+  2000-soorten".
+
+Colonne FE (Bosreservaten) — pas encore de couche confirmée malgré
+recherche approfondie (catalogue `metadata.vlaanderen.be`, capacités
+complètes Mercator, `geopunt.be` -- ce dernier n'expose son catalogue
+qu'en SPA JS, aucune API publique de secours trouvée)."""
 
 from __future__ import annotations
 
@@ -112,3 +123,22 @@ class WfsNatuurService:
             return None
         types = re.findall(r"<RVV:TYPE>([^<]*)</RVV:TYPE>", xml)
         return "O" if any(t.strip() == "ENR" for t in types) else "N"
+
+    def beheergebied_natura2000_soorten(self, x: float, y: float) -> Optional[str]:
+        """Colonne FD -- existence dans `am:am_behgebsoortenbescherming`
+        (host Mercator, EPSG:31370 -- PAS de reprojection 3812, voir le
+        docstring du module)."""
+        params = {
+            "service": "WFS", "version": "2.0.0", "request": "GetFeature",
+            "typeNames": "am:am_behgebsoortenbescherming", "count": 1,
+            "BBOX": self._bbox_31370(x, y),
+        }
+        try:
+            xml = self._http.get_text(_MERCATOR_WFS_BASE, params, service_key="natuur_be")
+        except Exception as exc:  # noqa: BLE001 — une couche indisponible ne doit jamais faire échouer tout le traitement de la parcelle
+            _logger.warning("Couche 'am:am_behgebsoortenbescherming' indisponible (x=%s, y=%s) : %s", x, y, exc)
+            return None
+        m = re.search(r'numberReturned="(\d+)"', xml)
+        if not m:
+            return None
+        return "O" if int(m.group(1)) > 0 else "N"

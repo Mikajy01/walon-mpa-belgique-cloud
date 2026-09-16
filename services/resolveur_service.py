@@ -28,6 +28,7 @@ from services.wfs_landschap_service import WfsLandschapService
 from services.wfs_natuur_service import WfsNatuurService
 from services.wfs_bodem_service import WfsBodemService
 from services.wfs_seveso_service import WfsSevesoService
+from services.wfs_steunzone_brownfield_service import WfsSteunzoneBrownfieldService
 from models.colonnes_be import COLONNES_BE
 from utils.text_normalize import meilleure_correspondance
 from utils.logger import get_logger
@@ -42,6 +43,7 @@ class ResolveurBE:
         landinrichting: WfsLandinrichtingService, woningbouw: WfsWoningbouwService,
         natuurinrichting: WfsNatuurinrichtingService, landschap: WfsLandschapService,
         natuur: WfsNatuurService, bodem: WfsBodemService, seveso: WfsSevesoService,
+        steunzone_brownfield: WfsSteunzoneBrownfieldService,
     ) -> None:
         self._gewestplan = gewestplan
         self._bruit = bruit
@@ -54,6 +56,7 @@ class ResolveurBE:
         self._natuur = natuur
         self._bodem = bodem
         self._seveso = seveso
+        self._steunzone_brownfield = steunzone_brownfield
 
     def resoudre(self, x: float, y: float) -> Dict[str, str]:
         """`x`/`y` : position (Lambert 72, EPSG:31370) — la position de
@@ -168,6 +171,15 @@ class ResolveurBE:
         # -- Seveso -------------------------------------------------------
         for lettre, methode in (
             ("EU", self._seveso.seveso_inrichting), ("EV", self._seveso.seveso_consultatiezone),
+        ):
+            v = methode(x, y)
+            if v is not None:
+                valeurs[lettre] = v
+
+        # -- Steunzone / Brownfield ---------------------------------------
+        for lettre, methode in (
+            ("ET", self._steunzone_brownfield.steunzone),
+            ("ES", self._steunzone_brownfield.brownfieldconvenant),
         ):
             v = methode(x, y)
             if v is not None:

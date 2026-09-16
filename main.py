@@ -34,6 +34,7 @@ from services.wfs_landinrichting_woningbouw_service import (
 from services.wfs_landschap_service import WfsLandschapService
 from services.wfs_natuur_service import WfsNatuurService
 from services.wfs_seveso_service import WfsSevesoService
+from services.wfs_steunzone_brownfield_service import WfsSteunzoneBrownfieldService
 from services.wfs_watertoets_service import WfsWatertoetsService
 from utils.logger import get_logger, setup_logging
 from utils.rate_limiter import RateLimiter
@@ -73,7 +74,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         WfsGewestplanService(http), WfsBruitService(http), WfsWatertoetsService(http),
         WfsEconomieService(http), WfsLandinrichtingService(http), WfsWoningbouwService(http),
         WfsNatuurinrichtingService(http), WfsLandschapService(http), WfsNatuurService(http),
-        WfsBodemService(http), WfsSevesoService(http),
+        WfsBodemService(http), WfsSevesoService(http), WfsSteunzoneBrownfieldService(http),
     )
 
     state_dir = Path(args.state_dir)

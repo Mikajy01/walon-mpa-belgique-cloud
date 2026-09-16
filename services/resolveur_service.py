@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
+from services.wfs_advieskaart_service import WfsAdvieskaartService
 from services.wfs_afstromingskaart_service import WfsAfstromingskaartService
 from services.wfs_gewestplan_service import WfsGewestplanService
 from services.wfs_bruit_service import WfsBruitService
@@ -50,7 +51,7 @@ class ResolveurBE:
         steunzone_brownfield: WfsSteunzoneBrownfieldService, ovam: WfsOvamService,
         grondverschuiving: WfsGrondverschuivingService,
         grondwaterwinning: WfsGrondwaterwinningService,
-        afstromingskaart: WfsAfstromingskaartService,
+        afstromingskaart: WfsAfstromingskaartService, advieskaart: WfsAdvieskaartService,
     ) -> None:
         self._gewestplan = gewestplan
         self._bruit = bruit
@@ -68,6 +69,7 @@ class ResolveurBE:
         self._grondverschuiving = grondverschuiving
         self._grondwaterwinning = grondwaterwinning
         self._afstromingskaart = afstromingskaart
+        self._advieskaart = advieskaart
 
     def resoudre(self, x: float, y: float) -> Dict[str, str]:
         """`x`/`y` : position (Lambert 72, EPSG:31370) — la position de
@@ -217,5 +219,9 @@ class ResolveurBE:
         colonne_afstr = self._afstromingskaart.colonne_afstromingskaart(x, y)
         if colonne_afstr:
             valeurs[colonne_afstr] = "O"
+
+        v = self._advieskaart.watertoets(x, y)
+        if v is not None:
+            valeurs["EM"] = v
 
         return valeurs

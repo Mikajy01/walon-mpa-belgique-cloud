@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -58,6 +59,19 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--cache-dir", default=str(config.CACHE_DIR))
     parser.add_argument("--logs-dir", default=str(config.BASE_DIR / "logs"))
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument(
+        "--budget-heures", type=float, default=5.5,
+        help=(
+            "Budget de temps interne (heures) -- au-delà, le run s'arrête "
+            "PROPREMENT (sauvegarde déjà faite à chaque parcelle) avant "
+            "qu'un timeout externe (ex: GitHub Actions) ne tue le job de "
+            "force, ce qui sauterait l'étape de commit. Incident réel "
+            "confirmé le 2026-09-16 : un run de 712 adresses annulé après "
+            "3h par le timeout du workflow, aucune sauvegarde poussée "
+            "(voir traiter_commune.yml). Même principe que côté France "
+            "(--budget-heures, défaut identique 5.5h)."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -96,8 +110,20 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     rues = [r.strip() for r in re.split(r"[,\n]", args.rues) if r.strip()]
 
+    deadline = datetime.now(timezone.utc) + timedelta(hours=args.budget_heures)
+    incomplet = False
+
     n_total_ecrites = 0
     for rue in rues:
+        if datetime.now(timezone.utc) >= deadline:
+            _logger.warning(
+                "Budget de temps (%.1fh) atteint avant '%s' -- rue (et toutes les suivantes) reportée(s) "
+                "au prochain run, rien n'est perdu (les rues déjà traitées restent sauvegardées).",
+                args.budget_heures, rue,
+            )
+            incomplet = True
+            break
+
         wb = charger_classeur(excel_path)
         ws = feuille_principale(wb)
         ws_rup = feuille_rup(wb)
@@ -110,6 +136,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         for p in parcelles:
             if p.parcelle.reference in deja_ecrits:
                 continue
+            if datetime.now(timezone.utc) >= deadline:
+                _logger.warning(
+                    "Budget de temps (%.1fh) atteint EN COURS de '%s' -- %d/%d parcelle(s) de cette rue "
+                    "traitée(s), le reste (et les rues suivantes) reporté au prochain run.",
+                    args.budget_heures, rue, n_ecrites_rue, len(parcelles),
+                )
+                incomplet = True
+                break
             a = p.adresses[0]
             valeurs = resolveur.resoudre(a.x, a.y)
             row = trouver_premiere_ligne_vide(ws)
@@ -145,6 +179,14 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         _logger.info("'%s' : %d nouvelle(s) ligne(s) écrite(s).", rue, n_ecrites_rue)
 
+    if incomplet:
+        _logger.warning(
+            "Résumé final (INCOMPLET, budget de temps atteint) : %d ligne(s) écrite(s) au total sur %d rue(s) "
+            "demandée(s) -- relancer avec les MÊMES arguments pour reprendre (les lignes déjà écrites sont "
+            "sautées automatiquement).",
+            n_total_ecrites, len(rues),
+        )
+        return 75
     _logger.info("Résumé final : %d ligne(s) écrite(s) au total sur %d rue(s).", n_total_ecrites, len(rues))
     return 0
 

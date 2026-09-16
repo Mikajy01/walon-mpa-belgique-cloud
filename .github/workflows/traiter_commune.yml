@@ -20,6 +20,11 @@ on:
         required: false
         type: boolean
         default: false
+      budget_heures:
+        description: "Budget de temps interne (heures) -- le run s'arrête PROPREMENT (sauvegarde déjà faite, commit garanti) avant cette limite plutôt que de risquer que GitHub tue le job de force. Doit rester (largement) sous timeout-minutes ci-dessous."
+        required: false
+        type: string
+        default: "5.5"
 
 # Nécessaire pour committer l'état (Excel) à la fin du run -- l'Excel
 # EST la source de vérité de progression, il doit être commité pour que
@@ -40,13 +45,18 @@ jobs:
     concurrency:
       group: traiter-commune-${{ inputs.commune }}-${{ inputs.code_postal }}
       cancel-in-progress: false
-    # Pas de mécanisme de budget de temps interne côté Belgique
-    # (contrairement à --budget-heures côté France) -- une liste de rues
-    # est toujours fournie explicitement par l'utilisateur, jamais une
-    # commune entière à découvrir, donc un run reste normalement court.
-    # Garde-fou dur généreux quand même, au cas où une rue contienne
-    # beaucoup plus de parcelles que prévu.
-    timeout-minutes: 180
+    # Incident réel confirmé le 2026-09-16 : un run de 712 adresses (10
+    # rues) a été tué par ce timeout (alors à 180 min) AVANT la fin --
+    # GitHub annule alors TOUT le job, ce qui saute l'étape de commit
+    # (marquée "skipped", pas "failure" : `continue-on-error` sur l'étape
+    # "Lancer le traitement" ne protège PAS contre une annulation au
+    # niveau du job). Résultat : 3h de traitement perdues, rien commité.
+    # Double garde-fou maintenant en place : --budget-heures (main.py)
+    # s'arrête proprement bien avant cette limite externe, qui reste un
+    # filet de sécurité générant marge de manœuvre -- 355 min = juste
+    # sous le plafond dur de 360 min (6h) des runners hébergés GitHub
+    # pour un seul job, même valeur que côté walon-map-france-cloud.
+    timeout-minutes: 355
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -75,7 +85,9 @@ jobs:
       # main.py -- `sauvegarder(wb, excel_path)` après CHAQUE parcelle,
       # rechargement immédiat), donc même un arrêt/crash en plein milieu
       # laisse un fichier cohérent sur disque -- toujours sûr à committer
-      # tel quel, peu importe la cause de l'arrêt.
+      # tel quel, peu importe la cause de l'arrêt. Code de sortie 75 =
+      # arrêt PROPRE et ATTENDU (budget de temps atteint, voir
+      # main.py::parse_args --budget-heures) -- pas une vraie erreur.
       - name: Lancer le traitement
         id: traitement
         continue-on-error: true
@@ -84,11 +96,12 @@ jobs:
             --commune "${{ inputs.commune }}" \
             --code-postal "${{ inputs.code_postal }}" \
             --rues "${{ inputs.rues }}" \
+            --budget-heures "${{ inputs.budget_heures }}" \
             ${{ inputs.debug && '--debug' || '' }}
 
-      - name: Signaler une erreur ou un arrêt inattendu
+      - name: Signaler un run incomplet ou en erreur
         if: steps.traitement.outcome == 'failure'
-        run: echo "::warning::Le traitement de '${{ inputs.commune }}' s'est arrêté avant la fin normale (voir les logs ci-dessus). L'état déjà calculé est commité normalement (chaque parcelle est sauvegardée dès qu'elle est résolue) ; relance le workflow pour reprendre là où ça s'est arrêté."
+        run: echo "::warning::Le traitement de '${{ inputs.commune }}' s'est arrêté avant la fin (budget de temps atteint, ou erreur -- voir les logs ci-dessus). L'état déjà calculé est commité normalement (chaque parcelle est sauvegardée dès qu'elle est résolue) ; relance le workflow avec les MÊMES arguments pour reprendre là où ça s'est arrêté (les lignes déjà écrites sont sautées automatiquement)."
 
       # `git push` seul, sans re-synchro avec origin, se fait rejeter dès
       # que master a avancé depuis le checkout (ex: un push de code

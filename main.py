@@ -27,6 +27,7 @@ from services.resolveur_service import ResolveurBE
 from services.wfs_bodem_service import WfsBodemService
 from services.wfs_bruit_service import WfsBruitService
 from services.wfs_economie_service import WfsEconomieService
+from services.wfs_afstromingskaart_service import WfsAfstromingskaartService
 from services.wfs_gewestplan_service import WfsGewestplanService
 from services.wfs_landinrichting_woningbouw_service import (
     WfsLandinrichtingService, WfsNatuurinrichtingService, WfsWoningbouwService,
@@ -79,6 +80,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         WfsNatuurinrichtingService(http), WfsLandschapService(http), WfsNatuurService(http),
         WfsBodemService(http), WfsSevesoService(http), WfsSteunzoneBrownfieldService(http),
         WfsOvamService(http), WfsGrondverschuivingService(http), WfsGrondwaterwinningService(http),
+        WfsAfstromingskaartService(http),
     )
 
     state_dir = Path(args.state_dir)

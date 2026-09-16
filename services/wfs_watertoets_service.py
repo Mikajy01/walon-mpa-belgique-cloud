@@ -27,10 +27,15 @@ overstromingen" — l'ABSENCE de feature à un point (réponse XML sans
 **Couches WFS supplémentaires** (`geo.api.vlaanderen.be`, trouvées via
 le catalogue officiel `metadata.vlaanderen.be`, PAS `mercator.vlaanderen.be`) :
 `NOG/wfs` (`NOG:Nog`, champ `LBLNATOORZ` → colonne DW),
-`OGOZ/wfs` (`OGOZ:Ogoz`, existence seule → colonne DZ).
+`OGOZ/wfs` (`OGOZ:Ogoz`, existence seule → colonne DZ),
+`RVV/wfs` (`RVV:Rvviwb`, champ `SRTTYPELAB` : "IWB Oeverzone"/"IWB
+Overstromingsgebied" → colonnes DR/DS — correspondance floue avec le
+libellé du gabarit ("IWB OeverzoneI"/"WB Overstromingsgebied", scores
+0.96/0.98, voir `utils/text_normalize.py`) : le même registre RVV que
+`wfs_natuur_service.py`, EPSG:31370).
 
-Colonnes DE, DR/DS, DV, DY, EA, EB — PAS encore de source confirmée
-(voir le plan)."""
+Colonnes DE, DV, DY, EA, EB — PAS encore de source confirmée (voir le
+plan)."""
 
 from __future__ import annotations
 
@@ -46,6 +51,7 @@ _WFS_BASE = "http://inspirepub.waterinfo.be/arcgis/services/waterinfo_WFS/MapSer
 _WMS_INFORMATIEPLICHT_BASE = "https://inspirepub.waterinfo.be/arcgis/services/informatieplicht/{dataset}/MapServer/WMSServer"
 _NOG_WFS_BASE = "https://geo.api.vlaanderen.be/NOG/wfs"
 _OGOZ_WFS_BASE = "https://geo.api.vlaanderen.be/OGOZ/wfs"
+_RVV_WFS_BASE = "https://geo.api.vlaanderen.be/RVV/wfs"
 
 
 class WfsWatertoetsService:
@@ -109,6 +115,28 @@ class WfsWatertoetsService:
     def overstromingsgebied_oeverzone_iwb(self, x: float, y: float) -> Optional[str]:
         """Existence seule — colonne DZ."""
         return self._existe_wfs(_OGOZ_WFS_BASE, "OGOZ", "Ogoz", x, y)
+
+    def colonne_afgebakend_oeverzone_iwb(self, x: float, y: float, marge_m: float = 5.0) -> Optional[str]:
+        """Renvoie "DR" ("IWB Oeverzone"), "DS" ("IWB Overstromingsgebied",
+        correspond au libellé du gabarit "WB Overstromingsgebied" via
+        correspondance floue, score 0.98) ou `None` si aucune des deux
+        `SRTTYPELAB` de `RVV:Rvviwb` à ce point."""
+        params = {
+            "service": "WFS", "version": "2.0.0", "request": "GetFeature",
+            "typeNames": "RVV:Rvviwb", "count": 10,
+            "BBOX": f"{x - marge_m},{y - marge_m},{x + marge_m},{y + marge_m},urn:ogc:def:crs:EPSG::31370",
+        }
+        try:
+            xml = self._http.get_text(_RVV_WFS_BASE, params, service_key="watertoets")
+        except Exception as exc:  # noqa: BLE001 — une couche indisponible ne doit jamais faire échouer tout le traitement de la parcelle
+            _logger.warning("Couche 'RVV:Rvviwb' indisponible (x=%s, y=%s) : %s", x, y, exc)
+            return None
+        labels = set(re.findall(r"<RVV:SRTTYPELAB>([^<]*)</RVV:SRTTYPELAB>", xml))
+        if "IWB Oeverzone" in labels:
+            return "DR"
+        if "IWB Overstromingsgebied" in labels:
+            return "DS"
+        return None
 
     # -- couches WMS (GetFeatureInfo, pas de WFS sur ces MapServer) -----
 

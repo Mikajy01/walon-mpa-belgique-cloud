@@ -14,11 +14,15 @@ HTTP 400, confirmé en direct), mais `GetFeatureInfo` fonctionne et
 renvoie un XML `<FIELDS>` exploitable par une simple regex, même esprit
 que le parsing GML du reste du projet :
 `overstromingsgevoelige_gebieden_pluviaal`/`_fluviaal`/`_vanuit_de_zee`
-— champ `gridcode`, confirmé en direct avec une vraie valeur (`1`) sur
-un point réel → colonnes DF→DI (Pluvial), DJ→DM (Fluvial), DN→DQ
-(vanuit zee). Mapping gridcode -> palier de probabilité PAS encore
-confirmé (une seule valeur observée) — à affiner avec plusieurs points
-réels de paliers différents avant mise en production.
+— champ `gridcode` → colonnes DF→DI (Pluvial), DJ→DM (Fluvial), DN→DQ
+(vanuit zee). Légende OFFICIELLE confirmée en direct (endpoint natif
+ArcGIS `.../MapServer/0?f=json`, `drawingInfo.renderer`, identique sur
+les 3 jeux de données) : `0`="A - Geen overstroming gemodelleerd",
+`1`="B - Kleine kans op overstromingen onder klimaatverandering",
+`2`="C - Kleine kans op overstromingen", `3`="D - Middelgrote kans op
+overstromingen" — l'ABSENCE de feature à un point (réponse XML sans
+`<FIELDS>`) signifie littéralement le palier 0/A, pas une erreur
+(confirmé via la légende, jamais deviné).
 
 **Couches WFS supplémentaires** (`geo.api.vlaanderen.be`, trouvées via
 le catalogue officiel `metadata.vlaanderen.be`, PAS `mercator.vlaanderen.be`) :
@@ -110,9 +114,14 @@ class WfsWatertoetsService:
 
     def _gridcode_wms(self, dataset: str, x: float, y: float, marge_m: float = 5.0) -> Optional[str]:
         """`GetFeatureInfo` sur le MapServer "informatieplicht/<dataset>",
-        renvoie le `gridcode` brut du premier `<FIELDS>` trouvé (mapping
-        exact code->palier pas encore confirmé, voir le docstring du
-        module) — `None` si aucune donnée à ce point."""
+        renvoie le `gridcode` BRUT (chaîne) trouvé, ou `"0"` si la
+        réponse est vide/exploitable mais sans `<FIELDS>` — confirmé en
+        direct via la légende officielle du serveur (`.../MapServer/0?
+        f=json`, `drawingInfo.renderer`) : l'ABSENCE de feature à ce
+        point signifie littéralement le palier "A - Geen overstroming
+        gemodelleerd" (gridcode 0), pas une erreur. Renvoie `None`
+        SEULEMENT en cas de vraie erreur réseau/service (jamais deviné
+        comme "0")."""
         url = _WMS_INFORMATIEPLICHT_BASE.format(dataset=dataset)
         params = {
             "service": "WMS", "version": "1.3.0", "request": "GetFeatureInfo",
@@ -127,16 +136,34 @@ class WfsWatertoetsService:
             _logger.warning("Couche WMS '%s' indisponible (x=%s, y=%s) : %s", dataset, x, y, exc)
             return None
         m = re.search(r'gridcode="([^"]*)"', xml)
-        return m.group(1) if m else None
+        return m.group(1) if m else "0"
 
-    def overstromingsgevoelig_pluviaal_gridcode(self, x: float, y: float) -> Optional[str]:
+    # Légende officielle confirmée en direct (identique sur les 3 jeux
+    # de données pluviaal/fluviaal/vanuit_de_zee, vérifié séparément
+    # pour chacun) : 0=A-Geen, 1=B-Kleine kans (climat), 2=C-Kleine kans,
+    # 3=D-Middelgrote kans -- ordre croissant = probabilité croissante.
+    _GRIDCODE_VERS_COLONNE = {"0": 0, "1": 1, "2": 2, "3": 3}
+
+    def _colonne_palier(self, gridcode: Optional[str], colonnes: tuple[str, str, str, str]) -> Optional[str]:
+        if gridcode is None:
+            return None
+        idx = self._GRIDCODE_VERS_COLONNE.get(gridcode)
+        if idx is None:
+            _logger.warning("gridcode '%s' inconnu de la légende confirmée -- aucune colonne cochée.", gridcode)
+            return None
+        return colonnes[idx]
+
+    def colonne_overstromingsgevoelig_pluviaal(self, x: float, y: float) -> Optional[str]:
         """Colonnes DF→DI (palier de probabilité pluvial)."""
-        return self._gridcode_wms("overstromingsgevoelige_gebieden_pluviaal", x, y)
+        gridcode = self._gridcode_wms("overstromingsgevoelige_gebieden_pluviaal", x, y)
+        return self._colonne_palier(gridcode, ("DF", "DG", "DH", "DI"))
 
-    def overstromingsgevoelig_fluviaal_gridcode(self, x: float, y: float) -> Optional[str]:
+    def colonne_overstromingsgevoelig_fluviaal(self, x: float, y: float) -> Optional[str]:
         """Colonnes DJ→DM (palier de probabilité fluvial)."""
-        return self._gridcode_wms("overstromingsgevoelige_gebieden_fluviaal", x, y)
+        gridcode = self._gridcode_wms("overstromingsgevoelige_gebieden_fluviaal", x, y)
+        return self._colonne_palier(gridcode, ("DJ", "DK", "DL", "DM"))
 
-    def overstromingsgevoelig_zee_gridcode(self, x: float, y: float) -> Optional[str]:
+    def colonne_overstromingsgevoelig_zee(self, x: float, y: float) -> Optional[str]:
         """Colonnes DN→DQ (palier de probabilité depuis la mer)."""
-        return self._gridcode_wms("overstromingsgevoelige_gebieden_vanuit_de_zee", x, y)
+        gridcode = self._gridcode_wms("overstromingsgevoelige_gebieden_vanuit_de_zee", x, y)
+        return self._colonne_palier(gridcode, ("DN", "DO", "DP", "DQ"))

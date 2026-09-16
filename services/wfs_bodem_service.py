@@ -32,19 +32,28 @@ class WfsBodemService:
     def _bbox(x: float, y: float, marge_m: float = 5.0) -> str:
         return f"{x - marge_m},{y - marge_m},{x + marge_m},{y + marge_m},urn:ogc:def:crs:EPSG::31370"
 
-    def potentiele_bodemerosie(self, x: float, y: float) -> Optional[str]:
-        """"O"/"N" — colonne EL."""
+    def _existe(self, typename: str, x: float, y: float) -> Optional[str]:
         params = {
             "service": "WFS", "version": "2.0.0", "request": "GetFeature",
-            "typeNames": "erosie:so_potbdmerosiepp_2025", "count": 1,
+            "typeNames": f"erosie:{typename}", "count": 1,
             "BBOX": self._bbox(x, y),
         }
         try:
             xml = self._http.get_text(_EROSIE_WFS_BASE, params, service_key="bodem_be")
         except Exception as exc:  # noqa: BLE001 — une couche indisponible ne doit jamais faire échouer tout le traitement de la parcelle
-            _logger.warning("Couche 'erosie:so_potbdmerosiepp_2025' indisponible (x=%s, y=%s) : %s", x, y, exc)
+            _logger.warning("Couche 'erosie:%s' indisponible (x=%s, y=%s) : %s", typename, x, y, exc)
             return None
         m = re.search(r'numberReturned="(\d+)"', xml)
         if not m:
             return None
         return "O" if int(m.group(1)) > 0 else "N"
+
+    def potentiele_bodemerosie(self, x: float, y: float) -> Optional[str]:
+        """"O"/"N" — colonne EL."""
+        return self._existe("so_potbdmerosiepp_2025", x, y)
+
+    def andere_erosiegerelateerde_gronden(self, x: float, y: float) -> Optional[str]:
+        """"O"/"N" — colonne EI. Millésime 2014 (le plus récent trouvé,
+        confirmé en direct avec 69 features réelles sur un échantillon
+        Flandre)."""
+        return self._existe("erosie_andere_erosiegerelateerde_gronden_2014", x, y)

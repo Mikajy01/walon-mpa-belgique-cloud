@@ -9,9 +9,14 @@ France) :
   ("Ruilverkaveling") — leurs titres se recoupent partiellement
   ("Herverkaveling"/"recht van voorkoop, landinrichtingsplan") sans
   correspondance exacte ni évidente entre les deux — laissées non
-  résolues plutôt que deviner laquelle est la bonne. La colonne EZ
-  ("Natuurinrichting") n'a AUCUNE couche correspondante dans ce service
-  — probablement un jeu de données séparé, non trouvé.
+  résolues plutôt que deviner laquelle est la bonne.
+
+- `RVV/wfs` (même registre "Recht Van Voorkoop" que
+  `wfs_natuur_service.py`/`wfs_watertoets_service.py`), couche
+  `Rvvnir` — SRTTYPELAB confirmé UNIQUE ("Natuurinrichtingsproject" sur
+  tout un échantillon large, aucune autre valeur observée) → colonne
+  EZ ("Natuurinrichting"), pas trouvée dans le service Landinrichting
+  dédié malgré son nom proche.
 
 - `WoningbWoonvernieuwing/wfs` — 2 couches confirmées en direct,
   correspondance directe et sans ambiguïté avec GF/GG.
@@ -33,6 +38,7 @@ _logger = get_logger("services.wfs_landinrichting_woningbouw_service")
 
 _LANDINRICHTING_BASE = "https://geo.api.vlaanderen.be/Landinrichting/wfs"
 _WONINGBOUW_BASE = "https://geo.api.vlaanderen.be/WoningbWoonvernieuwing/wfs"
+_RVV_BASE = "https://geo.api.vlaanderen.be/RVV/wfs"
 
 
 def _bbox(x: float, y: float, marge_m: float = 5.0) -> str:
@@ -82,6 +88,15 @@ class WfsLandinrichtingService(_ServiceExistenceWfs):
     def landinrichtingsplan(self, x: float, y: float) -> Optional[str]:
         """Colonne EY."""
         return self._existe("Landinrpl", x, y)
+
+
+class WfsNatuurinrichtingService(_ServiceExistenceWfs):
+    def __init__(self, http: HttpClient) -> None:
+        super().__init__(http, _RVV_BASE, "RVV", "natuurinrichting_be")
+
+    def natuurinrichting(self, x: float, y: float) -> Optional[str]:
+        """Colonne EZ."""
+        return self._existe("Rvvnir", x, y)
 
 
 class WfsWoningbouwService(_ServiceExistenceWfs):

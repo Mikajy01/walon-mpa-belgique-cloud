@@ -1,18 +1,25 @@
-"""Accès aux couches WFS "nature" confirmées en direct sur le host
-Mercator (EPSG:3812) — existence seule (motif `_existe`) :
+"""Accès aux couches WFS "nature" — 2 hosts distincts, existence seule
+(motif `_existe`) :
 
-- `ps:ps_ven` (VEN — Vlaams Ecologisch Netwerk) → colonne FH. Champ
-  `categorie` disponible (ex. "geno") mais pas encore nécessaire, la
-  colonne Excel FH ne distingue pas de sous-catégorie.
+**Host Mercator (EPSG:3812)** :
+- `ps:ps_ven` (VEN — Vlaams Ecologisch Netwerk) → colonne FH.
 - `ps:ps_duin` (gebieden duinendecreet) → colonne FG.
 
-Colonnes FD (Natura 2000 Habitatkaart/Beheergebieden), FE
-(Bosreservaten/Erkende Natuurreservaten — 2 couches probablement
-distinctes), FI (Habitatrichtlijngebieden), FJ (Vogelrichtlijngebieden)
-— PAS encore de couche confirmée sur ce host (recherche par mot-clé
-"habitat"/"vogel"/"natuurreservaat" infructueuse dans le
-GetCapabilities complet) : probablement un host séparé (Natura 2000 est
-souvent une source INSPIRE distincte), à investiguer."""
+**Host `geo.api.vlaanderen.be/RVV/wfs`** (EPSG:31370, trouvé via le
+catalogue officiel en cherchant "speciale beschermingszone" — RVV =
+"Recht Van Voorkoop", un registre de zones à droit de préemption qui
+recoupe plusieurs types de zones protégées) :
+- `RVV:Rvvsbz` (speciale beschermingszones) — 2 champs INDÉPENDANTS
+  confirmés en direct sur 94 features réelles (38 avec seulement
+  `HRLCODE` rempli, 23 avec seulement `VRLCODE`, 33 avec les deux, 0
+  avec aucun) : `HRLCODE` (Habitatrichtlijn) → colonne FI,
+  `VRLCODE` (Vogelrichtlijn) → colonne FJ. PAS un simple test
+  d'existence de la couche : il faut vérifier CE champ précis.
+- `RVV:Rvvnr` (réserves naturelles), champ `TYPE`="ENR" (Erkend
+  NatuurReservaat) → colonne FF "Erkende Natuurreservaten".
+
+Colonnes FD (Natura 2000 Habitatkaart/Beheergebieden Natura
+2000-soorten) et FE (Bosreservaten) — pas encore de couche confirmée."""
 
 from __future__ import annotations
 
@@ -25,7 +32,8 @@ from utils.logger import get_logger
 
 _logger = get_logger("services.wfs_natuur_service")
 
-_WFS_BASE = "https://www.mercator.vlaanderen.be/raadpleegdienstenmercatorpubliek/ows"
+_MERCATOR_WFS_BASE = "https://www.mercator.vlaanderen.be/raadpleegdienstenmercatorpubliek/ows"
+_RVV_WFS_BASE = "https://geo.api.vlaanderen.be/RVV/wfs"
 
 
 class WfsNatuurService:
@@ -33,18 +41,22 @@ class WfsNatuurService:
         self._http = http
 
     @staticmethod
-    def _bbox(x: float, y: float, marge_m: float = 5.0) -> str:
+    def _bbox_3812(x: float, y: float, marge_m: float = 5.0) -> str:
         return f"{x - marge_m},{y - marge_m},{x + marge_m},{y + marge_m},urn:ogc:def:crs:EPSG::3812"
 
-    def _existe(self, namespace: str, layer: str, x_l72: float, y_l72: float, marge_m: float = 5.0) -> Optional[str]:
+    @staticmethod
+    def _bbox_31370(x: float, y: float, marge_m: float = 5.0) -> str:
+        return f"{x - marge_m},{y - marge_m},{x + marge_m},{y + marge_m},urn:ogc:def:crs:EPSG::31370"
+
+    def _existe_mercator(self, namespace: str, layer: str, x_l72: float, y_l72: float, marge_m: float = 5.0) -> Optional[str]:
         x, y = lambert72_vers_3812(x_l72, y_l72)
         params = {
             "service": "WFS", "version": "2.0.0", "request": "GetFeature",
             "typeNames": f"{namespace}:{layer}", "count": 1,
-            "BBOX": self._bbox(x, y, marge_m),
+            "BBOX": self._bbox_3812(x, y, marge_m),
         }
         try:
-            xml = self._http.get_text(_WFS_BASE, params, service_key="natuur_be")
+            xml = self._http.get_text(_MERCATOR_WFS_BASE, params, service_key="natuur_be")
         except Exception as exc:  # noqa: BLE001 — une couche indisponible ne doit jamais faire échouer tout le traitement de la parcelle
             _logger.warning("Couche '%s:%s' indisponible (x=%s, y=%s) : %s", namespace, layer, x_l72, y_l72, exc)
             return None
@@ -55,8 +67,48 @@ class WfsNatuurService:
 
     def ven(self, x: float, y: float) -> Optional[str]:
         """Colonne FH."""
-        return self._existe("ps", "ps_ven", x, y)
+        return self._existe_mercator("ps", "ps_ven", x, y)
 
     def duinendecreet(self, x: float, y: float) -> Optional[str]:
         """Colonne FG."""
-        return self._existe("ps", "ps_duin", x, y)
+        return self._existe_mercator("ps", "ps_duin", x, y)
+
+    def _rvvsbz_champ_rempli(self, champ: str, x: float, y: float, marge_m: float = 5.0) -> Optional[str]:
+        """"O" si au moins une feature `Rvvsbz` à ce point a le champ
+        `champ` (`HRLCODE` ou `VRLCODE`) non vide -- PAS un simple test
+        d'existence de la couche (voir le docstring du module)."""
+        params = {
+            "service": "WFS", "version": "2.0.0", "request": "GetFeature",
+            "typeNames": "RVV:Rvvsbz", "count": 10,
+            "BBOX": self._bbox_31370(x, y, marge_m),
+        }
+        try:
+            xml = self._http.get_text(_RVV_WFS_BASE, params, service_key="natuur_be")
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning("Couche 'RVV:Rvvsbz' indisponible (x=%s, y=%s) : %s", x, y, exc)
+            return None
+        valeurs = re.findall(rf"<RVV:{champ}>([^<]*)</RVV:{champ}>", xml)
+        return "O" if any(v.strip() for v in valeurs) else "N"
+
+    def habitatrichtlijngebied(self, x: float, y: float) -> Optional[str]:
+        """Colonne FI."""
+        return self._rvvsbz_champ_rempli("HRLCODE", x, y)
+
+    def vogelrichtlijngebied(self, x: float, y: float) -> Optional[str]:
+        """Colonne FJ."""
+        return self._rvvsbz_champ_rempli("VRLCODE", x, y)
+
+    def erkend_natuurreservaat(self, x: float, y: float) -> Optional[str]:
+        """Colonne FF -- existence dans `RVV:Rvvnr` avec `TYPE`="ENR"."""
+        params = {
+            "service": "WFS", "version": "2.0.0", "request": "GetFeature",
+            "typeNames": "RVV:Rvvnr", "count": 10,
+            "BBOX": self._bbox_31370(x, y),
+        }
+        try:
+            xml = self._http.get_text(_RVV_WFS_BASE, params, service_key="natuur_be")
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning("Couche 'RVV:Rvvnr' indisponible (x=%s, y=%s) : %s", x, y, exc)
+            return None
+        types = re.findall(r"<RVV:TYPE>([^<]*)</RVV:TYPE>", xml)
+        return "O" if any(t.strip() == "ENR" for t in types) else "N"

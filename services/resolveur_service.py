@@ -242,6 +242,7 @@ class ResolveurBE:
             ("FI", self._natuur.habitatrichtlijngebied), ("FJ", self._natuur.vogelrichtlijngebied),
             ("FF", self._natuur.erkend_natuurreservaat),
             ("FD", self._natuur.beheergebied_natura2000_soorten),
+            ("FE", self._natuur.bosreservaat),
         ):
             v = methode(x, y)
             if v is not None:

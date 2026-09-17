@@ -27,10 +27,18 @@ SANS reprojection)** :
   `numac` confirmés en direct) → colonne FD "Beheergebieden Natura
   2000-soorten".
 
-Colonne FE (Bosreservaten) — pas encore de couche confirmée malgré
-recherche approfondie (catalogue `metadata.vlaanderen.be`, capacités
-complètes Mercator, `geopunt.be` -- ce dernier n'expose son catalogue
-qu'en SPA JS, aucune API publique de secours trouvée)."""
+**Host `geo.api.vlaanderen.be/Bosref/wfs` (EPSG:31370)** :
+- `Bosref:Bos` ("Bosreferentielaag 2000") → colonne FE "Bosreservaten".
+  CONSIGNE EXPLICITE DE L'EMPLOYEUR (2026-09-17), malgré un écart
+  conceptuel CONNU et documenté en direct : cette couche mesure "cette
+  parcelle était-elle boisée (n'importe quel bois) vers 1995-2000,
+  d'après interprétation d'orthophotos" (référence légale pour les
+  compensations de déboisement, Bosdecreet) -- PAS "ce bois est-il une
+  réserve forestière protégée" (Bosreservaten = statut de protection
+  spécifique, une désignation plus étroite). Aucune mention de
+  "reservaat" dans tout l'historique de traitement des métadonnées
+  officielles. Utilisée quand même sur consigne explicite : "même si on
+  sait que c'est faux, il vaut mieux respecter ce que dit l'employeur"."""
 
 from __future__ import annotations
 
@@ -45,6 +53,7 @@ _logger = get_logger("services.wfs_natuur_service")
 
 _MERCATOR_WFS_BASE = "https://www.mercator.vlaanderen.be/raadpleegdienstenmercatorpubliek/ows"
 _RVV_WFS_BASE = "https://geo.api.vlaanderen.be/RVV/wfs"
+_BOSREF_WFS_BASE = "https://geo.api.vlaanderen.be/Bosref/wfs"
 
 
 class WfsNatuurService:
@@ -123,6 +132,26 @@ class WfsNatuurService:
             return None
         types = re.findall(r"<RVV:TYPE>([^<]*)</RVV:TYPE>", xml)
         return "O" if any(t.strip() == "ENR" for t in types) else "N"
+
+    def bosreservaat(self, x: float, y: float) -> Optional[str]:
+        """Colonne FE -- existence dans `Bosref:Bos` ("Bosreferentielaag
+        2000"), sur consigne explicite de l'employeur malgré l'écart
+        conceptuel connu (voir le docstring du module : cette couche
+        mesure "est boisé", pas "est une réserve forestière protégée")."""
+        params = {
+            "service": "WFS", "version": "2.0.0", "request": "GetFeature",
+            "typeNames": "Bosref:Bos", "count": 1,
+            "BBOX": self._bbox_31370(x, y),
+        }
+        try:
+            xml = self._http.get_text(_BOSREF_WFS_BASE, params, service_key="natuur_be")
+        except Exception as exc:  # noqa: BLE001 — une couche indisponible ne doit jamais faire échouer tout le traitement de la parcelle
+            _logger.warning("Couche 'Bosref:Bos' indisponible (x=%s, y=%s) : %s", x, y, exc)
+            return None
+        m = re.search(r'numberReturned="(\d+)"', xml)
+        if not m:
+            return None
+        return "O" if int(m.group(1)) > 0 else "N"
 
     def beheergebied_natura2000_soorten(self, x: float, y: float) -> Optional[str]:
         """Colonne FD -- existence dans `am:am_behgebsoortenbescherming`

@@ -64,6 +64,18 @@ _logger = get_logger("services.wfs_rup_service")
 
 _WFS_BASE = "https://www.mercator.vlaanderen.be/raadpleegdienstenmercatorpubliek/ows"
 
+# Certains `svnaam` embarquent le numéro d'article EN DOUBLE avec `svnr`
+# (ex. "art. 8.33: woongebied met landelijk karakter", alors que `svnr`
+# vaut déjà "art. 10" séparément pour d'autres RUP) -- confirmé en
+# direct (2026-09-17), incohérence source. Demande explicite : enlever
+# ce préfixe avant d'utiliser `svnaam` comme nom de colonne dynamique
+# (voir excel_service.py) pour rester cohérent d'une zone à l'autre.
+_RE_PREFIXE_ARTICLE = re.compile(r"^art\.?\s*[\d.]+\s*:\s*", re.IGNORECASE)
+
+
+def _nettoyer_svnaam(svnaam: str) -> str:
+    return _RE_PREFIXE_ARTICLE.sub("", svnaam).strip()
+
 
 @dataclass
 class InfoRup:
@@ -111,7 +123,7 @@ class WfsRupService:
             resultats.append(InfoRup(
                 algplanid=m_algplanid.group(1).strip(),
                 naam=(m_naam.group(1).strip() if m_naam else ""),
-                svnaam=(m_sv.group(1).strip() if m_sv else ""),
+                svnaam=(_nettoyer_svnaam(m_sv.group(1)) if m_sv else ""),
                 svnr=(m_svnr.group(1).strip() if m_svnr else ""),
                 categorie=(m_cat.group(1).strip() if m_cat else ""),
                 legende=(m_leg.group(1).strip() if m_leg else ""),

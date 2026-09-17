@@ -25,6 +25,7 @@ from typing import Dict, Optional, Set
 
 import openpyxl
 from openpyxl.styles import PatternFill
+from openpyxl.styles.colors import Color
 from openpyxl.utils import column_index_from_string
 from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
@@ -212,6 +213,22 @@ def ecrire_ligne(
 
 DYNAMIC_RUP_FIRST_COL = 15  # O -- au-delà des 13 colonnes fixes (N=14 jamais utilisée par le gabarit officiel)
 
+# Demande du 2026-09-17 : l'en-tête d'une colonne dynamique va en ligne
+# 3 (comme "Lien d'execution commune"/"RUP" pour les colonnes fixes),
+# PAS en ligne 2 (réservée au libellé du THÈME, ex. "Plans d'exécution
+# spatiaux (Commune)..." -- une seule fois par bloc, pas par colonne
+# individuelle). Ligne 4 reprend le même "/" à fond gris que les
+# colonnes fixes (voir _FOND_GRIS_SLASH, couleur de thème EXACTE copiée
+# du gabarit officiel -- `theme=1, tint=0.249977111117893`, PAS une
+# couleur RGB approximative).
+DYNAMIC_RUP_HEADER_ROW = 3
+DYNAMIC_RUP_SLASH_ROW = 4
+_FOND_GRIS_SLASH = PatternFill(
+    patternType="solid",
+    fgColor=Color(theme=1, tint=0.249977111117893, type="theme"),
+    bgColor=Color(indexed=64),
+)
+
 
 def index_colonnes_dynamiques_rup(ws_rup: Worksheet) -> Dict[str, int]:
     """État actuel des colonnes dynamiques RUP déjà créées (clé
@@ -219,7 +236,7 @@ def index_colonnes_dynamiques_rup(ws_rup: Worksheet) -> Dict[str, int]:
     rester synchronisé."""
     index: Dict[str, int] = {}
     for col in range(DYNAMIC_RUP_FIRST_COL, ws_rup.max_column + 1):
-        v = ws_rup.cell(row=HEADER_ROW, column=col).value
+        v = ws_rup.cell(row=DYNAMIC_RUP_HEADER_ROW, column=col).value
         if v:
             index[str(v)] = col
     return index
@@ -229,16 +246,19 @@ def trouver_ou_creer_colonne_dynamique_rup(
     ws_rup: Worksheet, index: Dict[str, int], svnaam: str, legende: str,
 ) -> int:
     """Renvoie l'index de colonne pour `svnaam`, la créant (en fin de
-    feuille, avec l'en-tête + couleur de fond best-effort tirée de
-    `legende`) si elle n'existe pas encore. Met `index` à jour en
+    feuille, avec l'en-tête en ligne 3 + couleur de fond best-effort
+    tirée de `legende`, et le "/" à fond gris en ligne 4 comme les
+    colonnes fixes) si elle n'existe pas encore. Met `index` à jour en
     place."""
     if svnaam in index:
         return index[svnaam]
     nouvelle_col = max([DYNAMIC_RUP_FIRST_COL - 1, *index.values()]) + 1
-    cell = ws_rup.cell(row=HEADER_ROW, column=nouvelle_col, value=svnaam)
+    cell = ws_rup.cell(row=DYNAMIC_RUP_HEADER_ROW, column=nouvelle_col, value=svnaam)
     couleur = couleur_depuis_legende(legende)
     if couleur:
         cell.fill = PatternFill(start_color=couleur, end_color=couleur, fill_type="solid")
+    slash_cell = ws_rup.cell(row=DYNAMIC_RUP_SLASH_ROW, column=nouvelle_col, value="/")
+    slash_cell.fill = _FOND_GRIS_SLASH
     index[svnaam] = nouvelle_col
     return nouvelle_col
 

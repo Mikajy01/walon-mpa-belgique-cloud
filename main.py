@@ -159,7 +159,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # détaillées (jamais construit, risque de classement
                 # faux -- voir le plan), mais on RAPPORTE directement ce
                 # que l'API donne déjà pour ce point précis (lien vers
-                # la fiche + nom du plan/zone), sans aucune supposition.
+                # la fiche + code officiel du plan), sans aucune
+                # supposition. Colonne "RUP" = `algplanid` (ex.
+                # "RUP_71053_214_00026_00026"), PAS le nom lisible
+                # naam/svnaam -- correction du 2026-09-17 après
+                # comparaison avec un fichier traité manuellement.
                 ecrire_identite(
                     ws_rup, row, commune=args.commune, code_postal=args.code_postal, rue=rue,
                     numero=a.huisnummer, capakey=p.parcelle.reference,
@@ -170,8 +174,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     infos = methode(a.x, a.y)
                     if not infos:
                         continue
-                    texte = "; ".join(sorted({i.svnaam for i in infos if i.svnaam}))
-                    ecrire_rup(ws_rup, row, niveau, lien=infos[0].fichelink, texte=f"{infos[0].naam} — {texte}" if texte else infos[0].naam)
+                    codes = "; ".join(sorted({i.algplanid for i in infos if i.algplanid}))
+                    ecrire_rup(ws_rup, row, niveau, lien=infos[0].fichelink, texte=codes)
             sauvegarder(wb, excel_path)
             wb = charger_classeur(excel_path)
             ws = feuille_principale(wb)

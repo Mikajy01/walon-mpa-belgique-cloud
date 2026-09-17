@@ -10,13 +10,24 @@ Décision explicite de l'utilisateur (2026-09-16) : plutôt que de
 classer chaque parcelle dans une des ~25 catégories détaillées du bloc
 RUP de la feuille principale (jamais construit, risque de classement
 faux — voir le plan), on remplit directement la feuille "RUP" dédiée
-avec ce que l'API donne déjà SANS AUCUN classement : `naam` (nom du
-plan, ex. "Binnenstad"), `svnaam` (nom de la zone précise, ex. "woonzone
-met tuinstrook") et surtout **`fichelink`** — l'URL exacte demandée par
-l'instruction du gabarit ("indiquer le lien vers le RUP"), littéralement
+avec ce que l'API donne déjà SANS AUCUN classement : `fichelink` —
+l'URL exacte demandée par l'instruction du gabarit ("indiquer le lien
+vers le RUP"), littéralement
 `https://dsi.omgeving.vlaanderen.be/fiche-detail/<uuid>`, confirmée en
-direct dans la réponse WFS. Aucune supposition : on rapporte tel quel
-ce que le plan applicable à ce point précis contient réellement."""
+direct dans la réponse WFS.
+
+CORRECTION du 2026-09-17 (comparaison avec un fichier traité
+manuellement par un collègue, ex. "RUP_11025_214_00001_00001") : la
+colonne "RUP" de la feuille dédiée n'attend PAS le nom lisible du plan
+(`naam`/`svnaam`, ex. "Binnenstad — woonzone met tuinstrook") mais le
+**code officiel `algplanid`** du plan, ex. `RUP_71053_214_00026_00026`
+(71053 = code NIS de Sint-Truiden, confirmé en direct) — présent tel
+quel dans la réponse WFS des 3 niveaux (vérifié en direct sur
+`lu_gemrup_gv`/`lu_prorup_gv`, et présent dans le schéma de
+`lu_gewrup_gv` même si aucune feature régionale n'a encore été
+rencontrée pour le tester). `naam`/`svnaam` restent extraits et
+disponibles (utiles pour un contexte humain) mais ne sont plus ce qui
+est écrit dans la feuille Excel."""
 
 from __future__ import annotations
 
@@ -35,8 +46,9 @@ _WFS_BASE = "https://www.mercator.vlaanderen.be/raadpleegdienstenmercatorpubliek
 
 @dataclass
 class InfoRup:
-    naam: str  # nom du plan RUP, ex. "Binnenstad"
-    svnaam: str  # nom de la zone précise, ex. "woonzone met tuinstrook"
+    algplanid: str  # code officiel du plan, ex. "RUP_71053_214_00026_00026"
+    naam: str  # nom du plan RUP, ex. "Binnenstad" (contexte humain, pas écrit dans l'Excel)
+    svnaam: str  # nom de la zone précise, ex. "woonzone met tuinstrook" (idem)
     fichelink: str  # URL exacte vers la fiche RUP (dsi.omgeving.vlaanderen.be)
 
 
@@ -62,13 +74,15 @@ class WfsRupService:
             return []
         resultats: List[InfoRup] = []
         for bloc in xml.split("<wfs:member>")[1:]:
+            m_algplanid = re.search(r"<lu:algplanid>([^<]*)</lu:algplanid>", bloc)
             m_naam = re.search(r"<lu:naam>([^<]*)</lu:naam>", bloc)
             m_sv = re.search(r"<lu:svnaam>([^<]*)</lu:svnaam>", bloc)
             m_lien = re.search(r"<lu:fichelink>([^<]*)</lu:fichelink>", bloc)
-            if m_lien is None:
-                _logger.warning("Couche '%s' : membre sans 'fichelink' exploitable, ignoré.", layer)
+            if m_lien is None or m_algplanid is None:
+                _logger.warning("Couche '%s' : membre sans 'fichelink'/'algplanid' exploitable, ignoré.", layer)
                 continue
             resultats.append(InfoRup(
+                algplanid=m_algplanid.group(1).strip(),
                 naam=(m_naam.group(1).strip() if m_naam else ""),
                 svnaam=(m_sv.group(1).strip() if m_sv else ""),
                 fichelink=m_lien.group(1).strip(),

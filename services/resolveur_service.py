@@ -64,10 +64,26 @@ from services.wfs_ovam_service import WfsOvamService
 from services.wfs_seveso_service import WfsSevesoService
 from services.wfs_steunzone_brownfield_service import WfsSteunzoneBrownfieldService
 from models.colonnes_be import COLONNES_BE
-from utils.text_normalize import meilleure_correspondance
+from utils.text_normalize import meilleure_correspondance, normaliser
 from utils.logger import get_logger
 
 _logger = get_logger("services.resolveur_service")
+
+# Alias CONNUS pour des `svnaam` réels dont le score flou tombe juste
+# sous SEUIL_CORRESPONDANCE_FLOUE (0.85) malgré une correspondance
+# sémantique sans ambiguïté -- confirmé en direct le 2026-09-17 :
+# "landschappelijk waardevolle agrarische gebieden" (zones agricoles à
+# valeur paysagère, une sous-catégorie réelle du Gewestplan) ne score
+# que 0.843 contre la colonne Z ("Landschappelijke waarevolle gebieden"
+# -- le gabarit a lui-même une faute de frappe, "waarevolle" au lieu de
+# "waardevolle", ce qui abaisse encore le score), la 2e meilleure
+# correspondance restant loin derrière (0.576). Liste courte et
+# EXPLICITE plutôt que d'abaisser le seuil global (qui risquerait de
+# confondre deux catégories réellement différentes ailleurs) -- clé
+# normalisée (voir `normaliser`), vérifiée AVANT le calcul flou.
+ALIAS_GEWESTPLAN_CONNUS: Dict[str, str] = {
+    normaliser("landschappelijk waardevolle agrarische gebieden"): "Z",
+}
 
 
 def _un_parmi(valeurs: Dict[str, str], colonnes: Sequence[str], gagnants: Optional[Set[str]] = None) -> None:
@@ -128,7 +144,7 @@ class ResolveurBE:
         if svnaam_trouves:
             gagnants_gwp: Set[str] = set()
             for svnaam in svnaam_trouves:
-                colonne = meilleure_correspondance(svnaam, candidats_gwp)
+                colonne = ALIAS_GEWESTPLAN_CONNUS.get(normaliser(svnaam)) or meilleure_correspondance(svnaam, candidats_gwp)
                 if colonne:
                     gagnants_gwp.add(colonne)
                 else:

@@ -302,6 +302,18 @@ class ResolveurBE:
         if v is not None:
             valeurs["EM"] = v
 
+        # -- DE / DV / EB : aucune source live trouvée malgré recherche
+        # approfondie (voir wfs_watertoets_service.py) -- "N" partout,
+        # SANS couleur distinctive, sur demande explicite du 2026-09-17
+        # ("met les tous N sans colorer le fond"). BUG corrigé le
+        # 2026-09-18 : cette règle n'avait été appliquée qu'en patch
+        # direct sur un fichier déjà écrit, jamais ici dans le code --
+        # toute commune traitée depuis laissait ces 3 colonnes VIDES
+        # (confirmé en direct sur Lille, 2275).
+        valeurs["DE"] = "N"
+        valeurs["DV"] = "N"
+        valeurs["EB"] = "N"
+
         # -- RUP (AF->DB, 75 colonnes) -----------------------------------
         # Décision explicite de l'utilisateur (2026-09-16) : le bloc RUP
         # détaillé de la feuille principale n'est PAS rempli par le

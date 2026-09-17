@@ -19,6 +19,7 @@ Geopunt 1 1.xlsx", reçu le 2026-09-16, DEUX feuilles) :
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Dict, Optional, Set
 
@@ -31,6 +32,37 @@ from models.colonnes_be import COLONNES_BE
 from utils.logger import get_logger
 
 _logger = get_logger("services.excel_service")
+
+# Format court du numéro cadastral affiché sur la carte geopunt.be (ex.
+# "233D", "9") -- demande explicite de l'utilisateur du 2026-09-17,
+# confirmée par capture d'écran de la carte, PLUS FIABLE que le format
+# CaPaKey complet renvoyé par le WFS fédéral (71053H1081/00_000)
+# uniquement pour la LECTURE humaine du fichier final -- le format
+# complet reste la seule référence fiable en interne (une vraie
+# collision existe déjà entre deux communes différentes : "149L" =
+# Gippershovenstraat 1 (Sint-Truiden) ET Gorsem-Dorp 89 (rattachée à un
+# code cadastral historique différent, 71018), voir la conversation).
+_RE_CAPAKEY_COMPLET = re.compile(r"^(\d{5})([A-Z])(\d{4})/(\d{2})([A-Z_])(\d{3})$")
+
+
+def vers_capakey_court(reference: str) -> str:
+    """Convertit une référence cadastrale COMPLÈTE (71053H1081/00_000,
+    telle que renvoyée par le WFS fédéral -- voir cadastre_service.py)
+    vers le format court affiché sur geopunt.be (1081, 1049B, 59B...).
+    Renvoie `reference` INCHANGÉE si le motif attendu n'est pas
+    reconnu -- jamais d'exception qui ferait échouer tout le traitement
+    de la parcelle pour un simple souci de présentation."""
+    m = _RE_CAPAKEY_COMPLET.match(reference)
+    if not m:
+        _logger.warning("Référence cadastrale '%s' : motif inattendu, conversion au format court ignorée.", reference)
+        return reference
+    _nis, _section, parcel, _bisnum, bisletter, power = m.groups()
+    court = str(int(parcel))
+    if bisletter != "_":
+        court += bisletter
+    if power != "000":
+        court += str(int(power))
+    return court
 
 HEADER_ROW = 2
 FIRST_DATA_ROW = 5

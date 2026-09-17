@@ -21,7 +21,7 @@ from services.cadastre_service import CadastreService
 from services.decouverte_service import decouvrir_parcelles
 from services.excel_service import (
     charger_classeur, ecrire_identite, ecrire_ligne, ecrire_rup, feuille_principale, feuille_rup,
-    lire_capakeys_deja_ecrits, sauvegarder, trouver_premiere_ligne_vide,
+    lire_capakeys_deja_ecrits, sauvegarder, trouver_premiere_ligne_vide, vers_capakey_court,
 )
 from services.http_client import HttpClient
 from services.resolveur_service import ResolveurBE
@@ -136,7 +136,15 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         n_ecrites_rue = 0
         for p in parcelles:
-            if p.parcelle.reference in deja_ecrits:
+            # Format court affiché sur geopunt.be (ex. "1081", "1049B"),
+            # PAS le CaPaKey complet du WFS fédéral -- demande explicite
+            # de l'utilisateur du 2026-09-17, appliquée une seule fois
+            # ici puis réutilisée pour la comparaison "déjà écrit" ET
+            # les deux feuilles (principale + RUP), pour que les deux
+            # restent cohérentes entre elles et avec ce qui est déjà
+            # sur disque (voir excel_service.py::vers_capakey_court).
+            capakey_court = vers_capakey_court(p.parcelle.reference)
+            if capakey_court in deja_ecrits:
                 continue
             if datetime.now(timezone.utc) >= deadline:
                 _logger.warning(
@@ -151,7 +159,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             row = trouver_premiere_ligne_vide(ws)
             ecrire_ligne(
                 ws, row, commune=args.commune, code_postal=args.code_postal, rue=rue,
-                numero=a.huisnummer, capakey=p.parcelle.reference, valeurs=valeurs,
+                numero=a.huisnummer, capakey=capakey_court, valeurs=valeurs,
             )
             if ws_rup is not None:
                 # Même ligne que la feuille principale. Décision du
@@ -166,7 +174,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # comparaison avec un fichier traité manuellement.
                 ecrire_identite(
                     ws_rup, row, commune=args.commune, code_postal=args.code_postal, rue=rue,
-                    numero=a.huisnummer, capakey=p.parcelle.reference,
+                    numero=a.huisnummer, capakey=capakey_court,
                 )
                 for niveau, methode in (
                     ("region", rup.rup_region), ("province", rup.rup_province), ("commune", rup.rup_commune),

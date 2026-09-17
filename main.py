@@ -202,6 +202,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 ):
                     infos = methode(a.x, a.y)
                     if not infos:
+                        # Aucun RUP de ce niveau à ce point -- "/" plutôt
+                        # que vide (demande du 2026-09-17 : jamais de
+                        # cellule vide, toujours "O"/"N"/"/"). Confirmé
+                        # réel pour le niveau région (0/501 sur le lot
+                        # déjà traité), pas juste théorique.
+                        ecrire_rup(ws_rup, row, niveau, lien="/", texte="/")
                         continue
                     codes = "; ".join(sorted({i.algplanid for i in infos if i.algplanid}))
                     ecrire_rup(ws_rup, row, niveau, lien=infos[0].fichelink, texte=codes)

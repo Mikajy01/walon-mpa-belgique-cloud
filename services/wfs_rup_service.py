@@ -27,7 +27,28 @@ quel dans la réponse WFS des 3 niveaux (vérifié en direct sur
 `lu_gewrup_gv` même si aucune feature régionale n'a encore été
 rencontrée pour le tester). `naam`/`svnaam` restent extraits et
 disponibles (utiles pour un contexte humain) mais ne sont plus ce qui
-est écrit dans la feuille Excel."""
+est écrit dans la feuille Excel.
+
+EXTENSION du 2026-09-17 (processus manuel détaillé par l'utilisateur :
+recherche des RUP d'une commune puis lecture visuelle du "grafisch
+plan" PDF pour cocher, dans une colonne créée pour le type de zone
+rencontré, ex. "Zone voor lokaal bedrijventerrein") : PAS BESOIN de
+lire un PDF, ces champs supplémentaires existent DÉJÀ dans la même
+réponse WFS que `svnaam` :
+- `svnr` : numéro d'article, ex. "art. 10" (correspond au "Art. 3"
+  affiché dans la légende du PDF).
+- `categorie` : code court, ex. "WON" (wonen/habitat).
+- `legende` : description LITTÉRALE de la couleur affichée sur le plan
+  graphique, ex. "rood met licht groen" (rouge avec vert clair) --
+  confirmée en direct, correspond exactement à la couleur violette/etc.
+  visible dans la légende du PDF pour ce type de zone.
+Contrairement au classement dans les 75 colonnes FIXES de la feuille
+principale (fuzzy-matching risqué contre une liste prédéfinie,
+abandonné), cette extension ne fait JAMAIS de correspondance floue :
+`svnaam` sert directement et LITTÉRALEMENT de nom de colonne (créée à
+la volée si elle n'existe pas encore), donc aucun risque de mauvaise
+classification -- voir `services/excel_service.py::couleur_depuis_legende`
+et `trouver_ou_creer_colonne_dynamique`."""
 
 from __future__ import annotations
 
@@ -48,7 +69,10 @@ _WFS_BASE = "https://www.mercator.vlaanderen.be/raadpleegdienstenmercatorpubliek
 class InfoRup:
     algplanid: str  # code officiel du plan, ex. "RUP_71053_214_00026_00026"
     naam: str  # nom du plan RUP, ex. "Binnenstad" (contexte humain, pas écrit dans l'Excel)
-    svnaam: str  # nom de la zone précise, ex. "woonzone met tuinstrook" (idem)
+    svnaam: str  # nom de la zone précise, ex. "woonzone met tuinstrook" -- sert de nom de colonne dynamique
+    svnr: str  # numéro d'article, ex. "art. 10"
+    categorie: str  # code court, ex. "WON"
+    legende: str  # description littérale de la couleur du plan graphique, ex. "rood met licht groen"
     fichelink: str  # URL exacte vers la fiche RUP (dsi.omgeving.vlaanderen.be)
 
 
@@ -77,6 +101,9 @@ class WfsRupService:
             m_algplanid = re.search(r"<lu:algplanid>([^<]*)</lu:algplanid>", bloc)
             m_naam = re.search(r"<lu:naam>([^<]*)</lu:naam>", bloc)
             m_sv = re.search(r"<lu:svnaam>([^<]*)</lu:svnaam>", bloc)
+            m_svnr = re.search(r"<lu:svnr>([^<]*)</lu:svnr>", bloc)
+            m_cat = re.search(r"<lu:categorie>([^<]*)</lu:categorie>", bloc)
+            m_leg = re.search(r"<lu:legende>([^<]*)</lu:legende>", bloc)
             m_lien = re.search(r"<lu:fichelink>([^<]*)</lu:fichelink>", bloc)
             if m_lien is None or m_algplanid is None:
                 _logger.warning("Couche '%s' : membre sans 'fichelink'/'algplanid' exploitable, ignoré.", layer)
@@ -85,6 +112,9 @@ class WfsRupService:
                 algplanid=m_algplanid.group(1).strip(),
                 naam=(m_naam.group(1).strip() if m_naam else ""),
                 svnaam=(m_sv.group(1).strip() if m_sv else ""),
+                svnr=(m_svnr.group(1).strip() if m_svnr else ""),
+                categorie=(m_cat.group(1).strip() if m_cat else ""),
+                legende=(m_leg.group(1).strip() if m_leg else ""),
                 fichelink=m_lien.group(1).strip(),
             ))
         return resultats

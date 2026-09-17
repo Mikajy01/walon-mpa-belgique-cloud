@@ -20,8 +20,10 @@ from services.cache_service import HttpCache
 from services.cadastre_service import CadastreService
 from services.decouverte_service import decouvrir_parcelles
 from services.excel_service import (
-    charger_classeur, ecrire_identite, ecrire_ligne, ecrire_rup, feuille_principale, feuille_rup,
-    lire_capakeys_deja_ecrits, sauvegarder, trouver_premiere_ligne_vide, vers_capakey_court,
+    charger_classeur, cle_colonne_dynamique_rup, ecrire_identite, ecrire_ligne, ecrire_rup,
+    ecrire_zones_dynamiques_rup, feuille_principale, feuille_rup, index_colonnes_dynamiques_rup,
+    lire_capakeys_deja_ecrits, lire_capakeys_vers_lignes, sauvegarder, trouver_ou_creer_colonne_dynamique_rup,
+    trouver_premiere_ligne_vide, vers_capakey_court,
 )
 from services.http_client import HttpClient
 from services.resolveur_service import ResolveurBE
@@ -115,6 +117,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     deadline = datetime.now(timezone.utc) + timedelta(hours=args.budget_heures)
     incomplet = False
 
+    # Accumulé sur TOUTES les rues de ce run (neuves ET déjà écrites) --
+    # nécessaire pour la réconciliation finale des colonnes RUP
+    # dynamiques (voir plus bas et excel_service.py) : une colonne
+    # découverte en traitant la 8e rue doit aussi être remplie pour les
+    # lignes des 7 rues précédentes de CE MÊME run, pas seulement les
+    # lignes écrites après sa création.
+    suivi_reconciliation_rup: List[tuple] = []
+
     n_total_ecrites = 0
     for rue in rues:
         if datetime.now(timezone.utc) >= deadline:
@@ -130,6 +140,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         ws = feuille_principale(wb)
         ws_rup = feuille_rup(wb)
         deja_ecrits = lire_capakeys_deja_ecrits(ws)
+        capakeys_vers_lignes_rup = lire_capakeys_vers_lignes(ws_rup) if ws_rup is not None else {}
         _logger.info("Découverte de '%s' (%s)...", rue, args.commune)
         parcelles = decouvrir_parcelles(args.commune, rue, adressen, cadastre)
         _logger.info("'%s' : %d parcelle(s) trouvée(s), %d déjà écrite(s).", rue, len(parcelles), len(deja_ecrits))
@@ -145,6 +156,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             # sur disque (voir excel_service.py::vers_capakey_court).
             capakey_court = vers_capakey_court(p.parcelle.reference)
             if capakey_court in deja_ecrits:
+                # Déjà écrite (run précédent) : toujours suivie pour la
+                # réconciliation RUP dynamique plus bas (une nouvelle
+                # colonne découverte plus tard dans CE run doit aussi
+                # être remplie pour cette ligne), même si rien d'autre
+                # n'est retraité ici.
+                if ws_rup is not None:
+                    ligne_rup = capakeys_vers_lignes_rup.get(capakey_court)
+                    if ligne_rup is not None:
+                        a = p.adresses[0]
+                        suivi_reconciliation_rup.append((ligne_rup, a.x, a.y))
                 continue
             if datetime.now(timezone.utc) >= deadline:
                 _logger.warning(
@@ -184,6 +205,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                         continue
                     codes = "; ".join(sorted({i.algplanid for i in infos if i.algplanid}))
                     ecrire_rup(ws_rup, row, niveau, lien=infos[0].fichelink, texte=codes)
+                suivi_reconciliation_rup.append((row, a.x, a.y))
             sauvegarder(wb, excel_path)
             wb = charger_classeur(excel_path)
             ws = feuille_principale(wb)
@@ -192,6 +214,44 @@ def main(argv: Optional[List[str]] = None) -> int:
             n_total_ecrites += 1
 
         _logger.info("'%s' : %d nouvelle(s) ligne(s) écrite(s).", rue, n_ecrites_rue)
+
+    # -- Réconciliation des colonnes RUP dynamiques (une par type de zone
+    # rencontré, ex. "Zone voor lokaal bedrijventerrein") -----------------
+    # Demande explicite de l'utilisateur (2026-09-17) : `svnaam` sert
+    # directement de nom de colonne (aucune correspondance floue, voir
+    # wfs_rup_service.py). Faite en DEUX passes sur tout le lot de CE run
+    # (voir suivi_reconciliation_rup) : (1) créer toutes les colonnes
+    # nécessaires, (2) écrire "O"/"N" partout -- jamais les deux en même
+    # temps, sinon une colonne créée en traitant la ligne 300 resterait
+    # vide pour les lignes 1->299 déjà passées.
+    if suivi_reconciliation_rup:
+        wb = charger_classeur(excel_path)
+        ws_rup = feuille_rup(wb)
+        if ws_rup is not None:
+            _logger.info("Réconciliation des zones RUP détaillées (%d ligne(s))...", len(suivi_reconciliation_rup))
+            resultats = []  # (row, niveau, List[InfoRup])
+            for row, x, y in suivi_reconciliation_rup:
+                for niveau, methode in (
+                    ("region", rup.rup_region), ("province", rup.rup_province), ("commune", rup.rup_commune),
+                ):
+                    infos = methode(x, y)
+                    resultats.append((row, niveau, infos))
+
+            index = index_colonnes_dynamiques_rup(ws_rup)
+            for _row, niveau, infos in resultats:
+                for info in infos:
+                    if info.svnaam:
+                        trouver_ou_creer_colonne_dynamique_rup(ws_rup, index, niveau, info.svnaam, info.legende)
+
+            for row, niveau, infos in resultats:
+                gagnantes = {
+                    index[cle_colonne_dynamique_rup(niveau, info.svnaam)]
+                    for info in infos if info.svnaam
+                }
+                ecrire_zones_dynamiques_rup(ws_rup, row, index, niveau, gagnantes)
+
+            sauvegarder(wb, excel_path)
+            _logger.info("Réconciliation RUP terminée : %d colonne(s) de zone dynamique au total.", len(index))
 
     if incomplet:
         _logger.warning(

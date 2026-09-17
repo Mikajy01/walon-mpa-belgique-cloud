@@ -6,19 +6,45 @@ seules DE/DV/EB/FE restent sans source confirmée, voir le docstring de
 déjà construit et vérifié.
 
 Principe de sortie : `Dict[str, str]` lettre de colonne Excel -> valeur
-("O"/"N"/texte). Seules les valeurs RÉELLEMENT confirmées sont incluses
-— pour les groupes "un seul parmi plusieurs" (Gewestplan, paliers
-watertoets, bruit), seule la colonne gagnante est écrite ("O"), les
-colonnes sœurs restent ABSENTES du dict (donc la cellule Excel reste
-vide) plutôt que d'écrire "N" sans certitude sur les autres paliers
-possibles — décision délibérée, jamais de "N" deviné sur un groupe à
-choix unique tant que le remplissage systématique (une seule couche
-peut suffire à confirmer TOUTES les autres colonnes du groupe comme
-"N") n'est pas construit et vérifié."""
+("O"/"N"/texte).
+
+**Groupes "un seul parmi plusieurs" (Gewestplan, paliers watertoets,
+bruit, pollution des sols OVAM)** : décision du 2026-09-17 (demande
+explicite de l'utilisateur) -- `_un_parmi()` écrit maintenant "N" dans
+TOUTES les colonnes sœurs dès que le service a répondu, pas seulement
+"O" dans la gagnante. Ce n'est sûr QUE parce que chaque service
+concerné garantit une réponse EXHAUSTIVE une fois qu'il a répondu sans
+exception :
+- Gewestplan (`lu:lu_gwp_gv`) et les paliers watertoets pluvial/fluvial/
+  zee ont une légende OFFICIELLE confirmée en direct qui couvre TOUT le
+  territoire (y compris un palier explicite "A -- Geen ... gemodelleerd"
+  pour l'absence de risque) -- l'absence de correspondance ne signifie
+  jamais "pas de donnée", toujours "aucun des paliers listés".
+- OVAM a un palier de repli explicite "GE -- Geen bodeminfo" DANS le
+  service lui-même (`wfs_ovam_service.py`) pour l'absence de feature --
+  jamais une simple absence de réponse.
+- Bruit (`hh_weg_lnight`/`hh_lucht_lnight`/`hh_spoor_lden`) n'a PAS de
+  palier "en dessous du seuil" officiel distinct de "hors zone
+  modélisée" dans les données sources (voir `wfs_bruit_service.py`) --
+  extension DÉLIBÉRÉE du même principe qu'utilisent déjà ~100 autres
+  colonnes de ce pipeline (`None` = "N", que la couche n'ait renvoyé
+  aucune entité OU qu'une erreur réseau soit survenue, la distinction
+  n'étant exposée nulle part ailleurs dans ce projet non plus) --
+  cohérent avec l'existant, pas un risque nouveau.
+Chaque service continue de journaliser un avertissement sur une
+vraie erreur réseau ; le "N" écrit dans ce cas est donc une hypothèse
+DÉJÀ acceptée partout ailleurs dans ce pipeline, pas une nouveauté
+propre aux groupes à choix unique.
+
+Gewestplan reste le seul groupe où le remplissage est conditionné à une
+réponse BRUTE non vide du service (`svnaam_categories`) avant de
+marquer "N" partout -- 26 colonnes d'un coup sur une fausse déduction
+aurait un impact bien plus large qu'une colonne seule, marge de
+prudence supplémentaire justifiée par la taille du groupe."""
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Dict, Optional, Sequence, Set
 
 from services.wfs_advieskaart_service import WfsAdvieskaartService
 from services.wfs_afstromingskaart_service import WfsAfstromingskaartService
@@ -42,6 +68,17 @@ from utils.text_normalize import meilleure_correspondance
 from utils.logger import get_logger
 
 _logger = get_logger("services.resolveur_service")
+
+
+def _un_parmi(valeurs: Dict[str, str], colonnes: Sequence[str], gagnants: Optional[Set[str]] = None) -> None:
+    """Marque chaque colonne de `colonnes` "O" si elle est dans
+    `gagnants`, "N" sinon -- voir le docstring du module pour la
+    justification (sûr uniquement pour les groupes où le service
+    garantit une réponse exhaustive). `gagnants=None` ou `set()` marque
+    tout le groupe "N" (aucune colonne ne s'applique à ce point)."""
+    gagnants = gagnants or set()
+    for c in colonnes:
+        valeurs[c] = "O" if c in gagnants else "N"
 
 
 class ResolveurBE:
@@ -82,58 +119,68 @@ class ResolveurBE:
         valeurs: Dict[str, str] = {}
 
         # -- Gewestplan (un seul parmi 26, correspondance floue) -------
+        # Backfill "N" conditionné à une réponse BRUTE non vide (voir le
+        # docstring du module) -- seul groupe traité avec cette prudence
+        # supplémentaire vu sa taille (26 colonnes d'un coup).
+        gewestplan_colonnes = tuple(l for l, i in COLONNES_BE.items() if i["groupe"] == "gewestplan")
         candidats_gwp = {l: i["categorie"] for l, i in COLONNES_BE.items() if i["groupe"] == "gewestplan"}
-        for svnaam in self._gewestplan.svnaam_categories(x, y):
-            colonne = meilleure_correspondance(svnaam, candidats_gwp)
-            if colonne:
-                valeurs[colonne] = "O"
-            else:
-                _logger.warning("Gewestplan : svnaam '%s' sans correspondance >= seuil.", svnaam)
+        svnaam_trouves = self._gewestplan.svnaam_categories(x, y)
+        if svnaam_trouves:
+            gagnants_gwp: Set[str] = set()
+            for svnaam in svnaam_trouves:
+                colonne = meilleure_correspondance(svnaam, candidats_gwp)
+                if colonne:
+                    gagnants_gwp.add(colonne)
+                else:
+                    _logger.warning("Gewestplan : svnaam '%s' sans correspondance >= seuil.", svnaam)
+            _un_parmi(valeurs, gewestplan_colonnes, gagnants_gwp)
 
         # -- Bruit (un seul parmi 5, par thème) -------------------------
-        for methode in (
-            self._bruit.colonne_bruit_routes, self._bruit.colonne_bruit_aeroport,
-            self._bruit.colonne_bruit_voies_ferrees,
-        ):
-            colonne = methode(x, y)
-            if colonne:
-                valeurs[colonne] = "O"
+        geluid_wegen = tuple(l for l, i in COLONNES_BE.items() if i["groupe"] == "geluid_wegen")
+        geluid_luchthaven = tuple(l for l, i in COLONNES_BE.items() if i["groupe"] == "geluid_luchthaven")
+        geluid_spoorwegen = tuple(l for l, i in COLONNES_BE.items() if i["groupe"] == "geluid_spoorwegen")
+        c = self._bruit.colonne_bruit_routes(x, y)
+        _un_parmi(valeurs, geluid_wegen, {c} if c else None)
+        c = self._bruit.colonne_bruit_aeroport(x, y)
+        _un_parmi(valeurs, geluid_luchthaven, {c} if c else None)
+        c = self._bruit.colonne_bruit_voies_ferrees(x, y)
+        _un_parmi(valeurs, geluid_spoorwegen, {c} if c else None)
 
         # -- Watertoets ---------------------------------------------------
         overstr = self._watertoets.overstromingsgevoelig(x, y)
-        if overstr == "mogelijk":
-            valeurs["DC"] = "O"
-        elif overstr == "effectief":
-            valeurs["DD"] = "O"
+        gagnant_dcdd = "DC" if overstr == "mogelijk" else "DD" if overstr == "effectief" else None
+        _un_parmi(valeurs, ("DC", "DD"), {gagnant_dcdd} if gagnant_dcdd else None)
 
         signaal = self._watertoets.signaalgebied_categorie(x, y)
-        if signaal == "Bouwvrije opgave":
-            valeurs["DT"] = "O"
-        elif signaal == "Verscherpte watertoets":
-            valeurs["DU"] = "O"
+        gagnant_dtdu = "DT" if signaal == "Bouwvrije opgave" else "DU" if signaal == "Verscherpte watertoets" else None
+        _un_parmi(valeurs, ("DT", "DU"), {gagnant_dtdu} if gagnant_dtdu else None)
 
-        if self._watertoets.risicozone(x, y):
-            valeurs["DX"] = "O"
+        # DX : colonne seule (pas de sœur) -- risicozone() renvoie le
+        # texte du champ si une feature existe, sinon None (jamais
+        # deviné entre "hors zone" et "pas de risque", même convention
+        # que les ~100 autres colonnes existence-only du pipeline).
+        valeurs["DX"] = "O" if self._watertoets.risicozone(x, y) else "N"
 
         lbl = self._watertoets.van_nature_overstroombaar(x, y)
         if lbl:
             valeurs["DW"] = "O" if "niet" not in lbl.lower() else "N"
 
-        if self._watertoets.overstromingsgebied_oeverzone_iwb(x, y) == "O":
-            valeurs["DZ"] = "O"
+        # DZ : `overstromingsgebied_oeverzone_iwb` renvoie déjà "O"/"N"
+        # (voir `_existe_wfs`) -- écrire directement la valeur au lieu
+        # de filtrer sur "O" comme avant (le "N" calculé était jeté).
+        dz = self._watertoets.overstromingsgebied_oeverzone_iwb(x, y)
+        if dz is not None:
+            valeurs["DZ"] = dz
 
         iwb = self._watertoets.colonne_afgebakend_oeverzone_iwb(x, y)
-        if iwb:
-            valeurs[iwb] = "O"
+        _un_parmi(valeurs, ("DR", "DS"), {iwb} if iwb else None)
 
-        for methode in (
-            self._watertoets.colonne_overstromingsgevoelig_pluviaal,
-            self._watertoets.colonne_overstromingsgevoelig_fluviaal,
-            self._watertoets.colonne_overstromingsgevoelig_zee,
-        ):
-            colonne = methode(x, y)
-            if colonne:
-                valeurs[colonne] = "O"
+        pluvial = self._watertoets.colonne_overstromingsgevoelig_pluviaal(x, y)
+        _un_parmi(valeurs, ("DF", "DG", "DH", "DI"), {pluvial} if pluvial else None)
+        fluvial = self._watertoets.colonne_overstromingsgevoelig_fluviaal(x, y)
+        _un_parmi(valeurs, ("DJ", "DK", "DL", "DM"), {fluvial} if fluvial else None)
+        zee = self._watertoets.colonne_overstromingsgevoelig_zee(x, y)
+        _un_parmi(valeurs, ("DN", "DO", "DP", "DQ"), {zee} if zee else None)
 
         v = self._watertoets.recent_overstroomd(x, y)
         if v is not None:
@@ -209,10 +256,13 @@ class ResolveurBE:
             if v is not None:
                 valeurs[lettre] = v
 
-        # -- OVAM (pollution des sols) -------------------------------
+        # -- OVAM (pollution des sols, un seul parmi 6) -------------------
+        # Sûr à 100% : le service a déjà un palier de repli explicite
+        # "GE" pour l'absence de feature (voir wfs_ovam_service.py), donc
+        # `colonne_ovam` est None UNIQUEMENT sur une vraie erreur réseau.
+        bodem_verontr = tuple(l for l, i in COLONNES_BE.items() if i["groupe"] == "bodem_verontreiniging")
         colonne_ovam = self._ovam.colonne_bodemverontreiniging(x, y)
-        if colonne_ovam:
-            valeurs[colonne_ovam] = "O"
+        _un_parmi(valeurs, bodem_verontr, {colonne_ovam} if colonne_ovam else None)
 
         # -- Grondverschuivingen -----------------------------------------
         for lettre, methode in (
@@ -227,9 +277,9 @@ class ResolveurBE:
         if v is not None:
             valeurs["EA"] = v
 
+        afstroom_colonnes = tuple(l for l, i in COLONNES_BE.items() if i["groupe"] == "erosion_afstroming")
         colonne_afstr = self._afstromingskaart.colonne_afstromingskaart(x, y)
-        if colonne_afstr:
-            valeurs[colonne_afstr] = "O"
+        _un_parmi(valeurs, afstroom_colonnes, {colonne_afstr} if colonne_afstr else None)
 
         v = self._advieskaart.watertoets(x, y)
         if v is not None:

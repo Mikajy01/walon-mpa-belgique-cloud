@@ -190,6 +190,16 @@ def ecrire_ligne(
 # sert LITTÉRALEMENT de nom de colonne (aucune correspondance floue),
 # créée à la volée dès qu'un point tombe dans une zone jamais vue.
 #
+# Décision du 2026-09-17 : la colonne est nommée par `svnaam` SEUL, SANS
+# préfixe de niveau (région/province/commune) -- choix délibéré de
+# l'utilisateur pour matcher le processus manuel habituel, qui ne
+# distingue pas non plus par niveau. Risque accepté en connaissance de
+# cause : si le MÊME nom de zone existe à deux niveaux différents (rare
+# mais réellement possible), les deux se retrouvent fusionnés dans une
+# seule colonne. `noms_zones_par_niveau` (voir main.py) détecte ce cas
+# EXACT (un même `svnaam` matché par plus d'un niveau au cours d'un même
+# run) pour le signaler en fin de run -- jamais silencieux.
+#
 # Sûr UNIQUEMENT parce que la reconciliation (voir main.py) traite un lot
 # ENTIER de rues en une fois : toutes les colonnes nécessaires sont créées
 # AVANT que "O"/"N" ne soit écrit pour la moindre ligne de ce lot -- donc
@@ -203,14 +213,10 @@ def ecrire_ligne(
 DYNAMIC_RUP_FIRST_COL = 15  # O -- au-delà des 13 colonnes fixes (N=14 jamais utilisée par le gabarit officiel)
 
 
-def cle_colonne_dynamique_rup(niveau: str, svnaam: str) -> str:
-    return f"{niveau}: {svnaam}"
-
-
 def index_colonnes_dynamiques_rup(ws_rup: Worksheet) -> Dict[str, int]:
     """État actuel des colonnes dynamiques RUP déjà créées (clé
-    "niveau: svnaam" -> index de colonne) -- à relire après toute
-    création pour rester synchronisé."""
+    `svnaam` -> index de colonne) -- à relire après toute création pour
+    rester synchronisé."""
     index: Dict[str, int] = {}
     for col in range(DYNAMIC_RUP_FIRST_COL, ws_rup.max_column + 1):
         v = ws_rup.cell(row=HEADER_ROW, column=col).value
@@ -220,35 +226,31 @@ def index_colonnes_dynamiques_rup(ws_rup: Worksheet) -> Dict[str, int]:
 
 
 def trouver_ou_creer_colonne_dynamique_rup(
-    ws_rup: Worksheet, index: Dict[str, int], niveau: str, svnaam: str, legende: str,
+    ws_rup: Worksheet, index: Dict[str, int], svnaam: str, legende: str,
 ) -> int:
-    """Renvoie l'index de colonne pour `(niveau, svnaam)`, la créant (en
-    fin de feuille, avec l'en-tête + couleur de fond best-effort tirée
-    de `legende`) si elle n'existe pas encore. Met `index` à jour en
+    """Renvoie l'index de colonne pour `svnaam`, la créant (en fin de
+    feuille, avec l'en-tête + couleur de fond best-effort tirée de
+    `legende`) si elle n'existe pas encore. Met `index` à jour en
     place."""
-    cle = cle_colonne_dynamique_rup(niveau, svnaam)
-    if cle in index:
-        return index[cle]
+    if svnaam in index:
+        return index[svnaam]
     nouvelle_col = max([DYNAMIC_RUP_FIRST_COL - 1, *index.values()]) + 1
-    cell = ws_rup.cell(row=HEADER_ROW, column=nouvelle_col, value=cle)
+    cell = ws_rup.cell(row=HEADER_ROW, column=nouvelle_col, value=svnaam)
     couleur = couleur_depuis_legende(legende)
     if couleur:
         cell.fill = PatternFill(start_color=couleur, end_color=couleur, fill_type="solid")
-    index[cle] = nouvelle_col
+    index[svnaam] = nouvelle_col
     return nouvelle_col
 
 
 def ecrire_zones_dynamiques_rup(
-    ws_rup: Worksheet, row: int, index: Dict[str, int], niveau: str, colonnes_gagnantes: Set[int],
+    ws_rup: Worksheet, row: int, index: Dict[str, int], colonnes_gagnantes: Set[int],
 ) -> None:
-    """Marque "O"/"N" pour TOUTES les colonnes dynamiques déjà connues
-    du niveau donné, à cette ligne -- sûr uniquement si `index` contient
-    déjà toutes les colonnes nécessaires pour le LOT traité (voir le
-    docstring de section ci-dessus)."""
-    prefixe = f"{niveau}: "
-    for cle, col in index.items():
-        if not cle.startswith(prefixe):
-            continue
+    """Marque "O"/"N" pour TOUTES les colonnes dynamiques déjà connues, à
+    cette ligne -- sûr uniquement si `index` contient déjà toutes les
+    colonnes nécessaires pour le LOT traité (voir le docstring de
+    section ci-dessus)."""
+    for col in index.values():
         ws_rup.cell(row=row, column=col, value=("O" if col in colonnes_gagnantes else "N"))
 
 

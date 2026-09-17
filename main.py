@@ -20,7 +20,7 @@ from services.cache_service import HttpCache
 from services.cadastre_service import CadastreService
 from services.decouverte_service import decouvrir_parcelles
 from services.excel_service import (
-    charger_classeur, cle_colonne_dynamique_rup, ecrire_identite, ecrire_ligne, ecrire_rup,
+    charger_classeur, ecrire_identite, ecrire_ligne, ecrire_rup,
     ecrire_zones_dynamiques_rup, feuille_principale, feuille_rup, index_colonnes_dynamiques_rup,
     lire_capakeys_deja_ecrits, lire_capakeys_vers_lignes, sauvegarder, trouver_ou_creer_colonne_dynamique_rup,
     trouver_premiere_ligne_vide, vers_capakey_court,
@@ -82,6 +82,22 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 def chemin_etat_commune(state_dir: Path, commune: str, code_postal: str) -> Path:
     slug = re.sub(r"[^a-z0-9]+", "-", commune.strip().lower()).strip("-")
     return state_dir / f"{code_postal}_{slug}.xlsx"
+
+
+def _log_progres(prefixe: str, actuel: int, total: int, largeur: int = 30) -> None:
+    """Barre de progression textuelle dans les logs -- demande du
+    2026-09-17. Affichée seulement à des paliers d'environ 5% (+ le
+    tout premier et le tout dernier élément) pour ne pas noyer les logs
+    d'une ligne par parcelle sur une rue de 400 adresses."""
+    if total <= 0:
+        return
+    palier = max(1, total // 20)
+    if actuel != 1 and actuel != total and actuel % palier != 0:
+        return
+    pct = actuel / total
+    n_rempli = int(largeur * pct)
+    barre = "#" * n_rempli + "-" * (largeur - n_rempli)
+    _logger.info("%s [%s] %3d%% (%d/%d)", prefixe, barre, int(pct * 100), actuel, total)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -146,7 +162,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         _logger.info("'%s' : %d parcelle(s) trouvée(s), %d déjà écrite(s).", rue, len(parcelles), len(deja_ecrits))
 
         n_ecrites_rue = 0
-        for p in parcelles:
+        for i_parcelle, p in enumerate(parcelles):
+            _log_progres(f"'{rue}'", i_parcelle + 1, len(parcelles))
             # Format court affiché sur geopunt.be (ex. "1081", "1049B"),
             # PAS le CaPaKey complet du WFS fédéral -- demande explicite
             # de l'utilisateur du 2026-09-17, appliquée une seule fois
@@ -224,9 +241,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     # -- Réconciliation des colonnes RUP dynamiques (une par type de zone
     # rencontré, ex. "Zone voor lokaal bedrijventerrein") -----------------
     # Demande explicite de l'utilisateur (2026-09-17) : `svnaam` sert
-    # directement de nom de colonne (aucune correspondance floue, voir
-    # wfs_rup_service.py). Faite en DEUX passes sur tout le lot de CE run
-    # (voir suivi_reconciliation_rup) : (1) créer toutes les colonnes
+    # directement de nom de colonne, SANS préfixe de niveau (choix
+    # délibéré, matche le processus manuel habituel -- risque accepté
+    # qu'un même nom de zone à deux niveaux différents partage la même
+    # colonne, détecté et signalé en fin de run ci-dessous plutôt que
+    # silencieux). Faite en DEUX passes sur tout le lot de CE run (voir
+    # suivi_reconciliation_rup) : (1) créer toutes les colonnes
     # nécessaires, (2) écrire "O"/"N" partout -- jamais les deux en même
     # temps, sinon une colonne créée en traitant la ligne 300 resterait
     # vide pour les lignes 1->299 déjà passées.
@@ -234,30 +254,44 @@ def main(argv: Optional[List[str]] = None) -> int:
         wb = charger_classeur(excel_path)
         ws_rup = feuille_rup(wb)
         if ws_rup is not None:
-            _logger.info("Réconciliation des zones RUP détaillées (%d ligne(s))...", len(suivi_reconciliation_rup))
-            resultats = []  # (row, niveau, List[InfoRup])
-            for row, x, y in suivi_reconciliation_rup:
+            n_a_reconcilier = len(suivi_reconciliation_rup)
+            _logger.info("Réconciliation des zones RUP détaillées (%d ligne(s))...", n_a_reconcilier)
+            resultats = []  # (row, List[InfoRup]) -- fusion des 3 niveaux
+            niveaux_par_svnaam: dict = {}  # détection de collision inter-niveaux (voir ci-dessus)
+            for i, (row, x, y) in enumerate(suivi_reconciliation_rup):
+                infos_ligne = []
                 for niveau, methode in (
                     ("region", rup.rup_region), ("province", rup.rup_province), ("commune", rup.rup_commune),
                 ):
                     infos = methode(x, y)
-                    resultats.append((row, niveau, infos))
+                    for info in infos:
+                        if info.svnaam:
+                            niveaux_par_svnaam.setdefault(info.svnaam, set()).add(niveau)
+                    infos_ligne.extend(infos)
+                resultats.append((row, infos_ligne))
+                _log_progres("Réconciliation RUP", i + 1, n_a_reconcilier)
 
             index = index_colonnes_dynamiques_rup(ws_rup)
-            for _row, niveau, infos in resultats:
+            for _row, infos in resultats:
                 for info in infos:
                     if info.svnaam:
-                        trouver_ou_creer_colonne_dynamique_rup(ws_rup, index, niveau, info.svnaam, info.legende)
+                        trouver_ou_creer_colonne_dynamique_rup(ws_rup, index, info.svnaam, info.legende)
 
-            for row, niveau, infos in resultats:
-                gagnantes = {
-                    index[cle_colonne_dynamique_rup(niveau, info.svnaam)]
-                    for info in infos if info.svnaam
-                }
-                ecrire_zones_dynamiques_rup(ws_rup, row, index, niveau, gagnantes)
+            for row, infos in resultats:
+                gagnantes = {index[info.svnaam] for info in infos if info.svnaam}
+                ecrire_zones_dynamiques_rup(ws_rup, row, index, gagnantes)
 
             sauvegarder(wb, excel_path)
             _logger.info("Réconciliation RUP terminée : %d colonne(s) de zone dynamique au total.", len(index))
+
+            collisions = {s: n for s, n in niveaux_par_svnaam.items() if len(n) > 1}
+            if collisions:
+                _logger.warning(
+                    "%d zone(s) RUP avec le MÊME nom rencontrées à PLUSIEURS niveaux différents (colonne "
+                    "partagée, distinction de niveau perdue pour ces colonnes -- risque accepté) : %s",
+                    len(collisions),
+                    "; ".join(f"'{s}' ({'/'.join(sorted(n))})" for s, n in collisions.items()),
+                )
 
     if incomplet:
         _logger.warning(

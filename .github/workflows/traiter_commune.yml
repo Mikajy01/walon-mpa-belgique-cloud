@@ -20,6 +20,11 @@ on:
         required: false
         type: boolean
         default: false
+      rayon_geometrique_m:
+        description: "Rayon (m) autour de la route pour les parcelles SANS adresse (découverte géométrique, Wegenregister). 10 (défaut) = parcelles qui bordent la route ; 50 = jusqu'à 50 m (champs derrière, rues rurales sans numéros comme Rode Moerdijk)."
+        required: false
+        type: string
+        default: "10"
       budget_heures:
         description: "Budget de temps interne (heures) -- le run s'arrête PROPREMENT (sauvegarde déjà faite, commit garanti) avant cette limite plutôt que de risquer que GitHub tue le job de force. Doit rester NETTEMENT sous timeout-minutes (360 min = 6h, le plafond dur GitHub) -- garder au moins 30 min d'écart."
         required: false
@@ -101,6 +106,7 @@ jobs:
             --code-postal "${{ inputs.code_postal }}" \
             --rues "${{ inputs.rues }}" \
             --budget-heures "${{ inputs.budget_heures }}" \
+            --rayon-geometrique-m "${{ inputs.rayon_geometrique_m }}" \
             ${{ inputs.debug && '--debug' || '' }}
 
       - name: Signaler un run incomplet ou en erreur

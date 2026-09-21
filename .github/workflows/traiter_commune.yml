@@ -20,6 +20,11 @@ on:
         required: false
         type: boolean
         default: false
+      repartir_de_zero:
+        description: "ATTENTION : archive le fichier Excel existant de cette commune (state/...backup-...-avant-reset.xlsx) et repart d'un fichier VIDE, pour que TOUTES les parcelles de chaque rue soient écrites dans l'ordre (un côté puis l'autre, le long de la rue). À cocher UNIQUEMENT au premier run ; si ce run s'arrête avant la fin (budget de temps), relance-le SANS cocher pour reprendre."
+        required: false
+        type: boolean
+        default: false
       rayon_geometrique_m:
         description: "Rayon (m) autour de la route pour les parcelles SANS adresse (découverte géométrique, Wegenregister). 10 (défaut) = parcelles qui bordent la route ; 50 = jusqu'à 50 m (champs derrière, rues rurales sans numéros comme Rode Moerdijk)."
         required: false
@@ -107,6 +112,7 @@ jobs:
             --rues "${{ inputs.rues }}" \
             --budget-heures "${{ inputs.budget_heures }}" \
             --rayon-geometrique-m "${{ inputs.rayon_geometrique_m }}" \
+            ${{ inputs.repartir_de_zero && '--repartir-de-zero' || '' }} \
             ${{ inputs.debug && '--debug' || '' }}
 
       - name: Signaler un run incomplet ou en erreur

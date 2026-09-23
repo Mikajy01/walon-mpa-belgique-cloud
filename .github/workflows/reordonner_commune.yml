@@ -1,0 +1,110 @@
+name: Réordonner une commune
+
+# Complète "Traiter une commune" : ce dernier écrit toujours une parcelle
+# NEUVE à la fin du fichier (voir reordonnancement_service.py), donc une rue
+# déjà traitée qui reçoit de nouvelles parcelles lors d'un run ULTÉRIEUR
+# (ex. parcelles sans adresse trouvées grâce à un correctif ajouté après
+# coup) se retrouve coupée en deux blocs. Ce workflow redécouvre chaque rue
+# déjà présente et range les lignes EXISTANTES à leur vraie place le long de
+# la route -- ne calcule ni n'ajoute AUCUNE colonne thématique, uniquement
+# une permutation de lignes déjà là. À lancer APRÈS "Traiter une commune",
+# jamais à la place.
+on:
+  workflow_dispatch:
+    inputs:
+      commune:
+        description: "Nom de la commune (ex: Aalter) -- doit correspondre EXACTEMENT à celui déjà utilisé par 'Traiter une commune' pour ce fichier."
+        required: true
+        type: string
+      code_postal:
+        description: "Code postal (ex: 9910)"
+        required: true
+        type: string
+      rayon_geometrique_m:
+        description: "Même rôle que dans 'Traiter une commune' -- DOIT correspondre au rayon utilisé lors du/des run(s) réel(s) sur cette commune (10 par défaut ; 50 si cette commune a été traitée avec ce réglage, ex. rues rurales sans adresse)."
+        required: false
+        type: string
+        default: "10"
+      debug:
+        description: "Logs détaillés (DEBUG)."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  reordonner:
+    runs-on: ubuntu-latest
+    # Même groupe que "Traiter une commune" (PAS un groupe séparé) : les deux
+    # touchent le même fichier state/{code_postal}_{commune}.xlsx, jamais en
+    # parallèle l'un de l'autre pour la même commune.
+    concurrency:
+      group: traiter-commune-${{ inputs.commune }}-${{ inputs.code_postal }}
+      cancel-in-progress: false
+    # Pas de mécanisme de reprise partielle ici (contrairement à
+    # --budget-heures côté "Traiter une commune") : la permutation est
+    # calculée pour TOUTES les rues avant la moindre écriture, puis
+    # sauvegardée UNE seule fois à la fin (voir reordonnancement_service.py)
+    # -- un arrêt en cours de route ne commit rien (le fichier reste
+    # inchangé), jamais un état à moitié réordonné. Relancer le workflow
+    # à l'identique reprend proprement depuis zéro. Marge large plutôt
+    # qu'un budget interne, le calcul restant plus léger qu'un traitement
+    # complet (aucune des ~18 couches WFS thématiques n'est interrogée).
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+
+      - name: Restaurer le cache HTTP
+        uses: actions/cache@v4
+        with:
+          path: cache
+          key: http-cache-${{ inputs.commune }}-${{ github.run_id }}
+          restore-keys: |
+            http-cache-${{ inputs.commune }}-
+
+      - name: Réordonner
+        run: |
+          python reordonner.py \
+            --commune "${{ inputs.commune }}" \
+            --code-postal "${{ inputs.code_postal }}" \
+            --rayon-geometrique-m "${{ inputs.rayon_geometrique_m }}" \
+            ${{ inputs.debug && '--debug' || '' }}
+
+      # Même motif de commit/push que "Traiter une commune" (voir ce
+      # workflow pour le détail des choix -- rebase + 3 tentatives, jamais
+      # de fusion automatique sur l'Excel binaire).
+      - name: Committer l'état (Excel) si modifié
+        run: |
+          git config user.name "walon-mpa-belgique-cloud bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add state/
+          if git diff --staged --quiet; then
+            echo "Rien à committer."
+            exit 0
+          fi
+          git commit -m "Réordonnancement automatique : ${{ inputs.commune }} (${{ inputs.code_postal }})"
+          for tentative in 1 2 3; do
+            if git push; then
+              exit 0
+            fi
+            echo "Push rejeté (tentative $tentative/3) -- resynchronisation avec origin/master avant nouvel essai."
+            git fetch origin master
+            if ! git rebase origin/master; then
+              echo "::error::Conflit de fusion réel sur state/ -- aucune fusion automatique tentée sur un fichier binaire. Réordonnancement de CE run non commité (perdu, mais le fichier source n'a jamais été modifié qu'en mémoire avant sauvegarde -- rien de corrompu) ; relancer le workflow."
+              git rebase --abort
+              exit 1
+            fi
+          done
+          echo "::error::Échec du push après 3 tentatives (rejets répétés sans conflit). Relancer le workflow."
+          exit 1

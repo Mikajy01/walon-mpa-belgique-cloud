@@ -143,7 +143,15 @@ jobs:
         run: |
           git config user.name "walon-mpa-belgique-cloud bot"
           git config user.email "actions@users.noreply.github.com"
-          git add state/
+          # registry_data/ (cellules_a_revisiter.csv) DOIT être commité ici aussi --
+          # bug réel confirmé le 2026-09-22 : seul state/ était ajouté, donc ce
+          # fichier de suivi (créé/rempli PENDANT le run sur ce runner éphémère)
+          # n'était jamais committé -- il disparaissait à la fin de CHAQUE run,
+          # rendant le nouvel essai automatique en tête de main.py (voir
+          # erreurs_service.py::reessayer_cellules_erreur) totalement inopérant
+          # sur GitHub Actions (fonctionnait seulement en local, où ce dossier
+          # persiste sur disque entre deux invocations).
+          git add state/ registry_data/
           if git diff --staged --quiet; then
             echo "Rien à committer."
             exit 0

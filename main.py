@@ -261,10 +261,18 @@ def main(argv: Optional[List[str]] = None) -> int:
                 incomplet = True
                 break
             a = p.adresses[0]
+            # Code postal RÉEL de CETTE adresse précise (voir AdresseBE.postcode)
+            # -- écart réel confirmé le 2026-09-23 (Sint-Truiden) : un même lot de
+            # rues à traiter peut mélanger plusieurs codes postaux réels
+            # (déelgemeenten/communes fusionnées) ; repli sur celui du run
+            # UNIQUEMENT si le registre n'en a fourni aucun (rare : adresse dont le
+            # detail a échoué, ou parcelle géométrique d'une rue sans adresse du
+            # tout, voir decouverte_service.py).
+            code_postal_ligne = a.postcode or args.code_postal
             valeurs, erreurs_colonnes = resolveur.resoudre(a.x, a.y)
             row = trouver_premiere_ligne_vide(ws)
             ecrire_ligne(
-                ws, row, commune=args.commune, code_postal=args.code_postal, rue=rue,
+                ws, row, commune=args.commune, code_postal=code_postal_ligne, rue=rue,
                 numero=a.huisnummer, capakey=capakey_court, valeurs=valeurs,
             )
             if erreurs_colonnes:
@@ -273,7 +281,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # jamais silencieux, jamais confondu avec un vrai "N".
                 tracer_cellules_erreur(
                     config.CELLULES_A_REVISITER_PATH, excel_path=excel_path, commune=args.commune,
-                    code_postal=args.code_postal, rue=rue, numero=a.huisnummer, capakey=capakey_court,
+                    code_postal=code_postal_ligne, rue=rue, numero=a.huisnummer, capakey=capakey_court,
                     x=a.x, y=a.y, colonnes=erreurs_colonnes,
                 )
             if ws_rup is not None:
@@ -288,7 +296,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # naam/svnaam -- correction du 2026-09-17 après
                 # comparaison avec un fichier traité manuellement.
                 ecrire_identite(
-                    ws_rup, row, commune=args.commune, code_postal=args.code_postal, rue=rue,
+                    ws_rup, row, commune=args.commune, code_postal=code_postal_ligne, rue=rue,
                     numero=a.huisnummer, capakey=capakey_court,
                 )
                 for niveau, methode in (

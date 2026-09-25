@@ -25,7 +25,7 @@ from services.decouverte_service import decouvrir_parcelles
 from services.erreurs_service import purger_cellules_fichier, reessayer_cellules_erreur, tracer_cellules_erreur
 from services.exceptions import ApiServiceError
 from services.excel_service import (
-    charger_classeur, ecrire_identite, ecrire_ligne, ecrire_rup,
+    FIRST_DATA_ROW, charger_classeur, ecrire_identite, ecrire_ligne, ecrire_rup,
     ecrire_zones_dynamiques_rup, feuille_principale, feuille_rup, index_colonnes_dynamiques_rup,
     lire_capakeys_deja_ecrits, lire_capakeys_vers_lignes, sauvegarder, trouver_ou_creer_colonne_dynamique_rup,
     trouver_premiere_ligne_vide, vers_capakey_court,
@@ -383,10 +383,41 @@ def main(argv: Optional[List[str]] = None) -> int:
                 _log_progres("Réconciliation RUP", i + 1, n_a_reconcilier)
 
             index = index_colonnes_dynamiques_rup(ws_rup)
+            colonnes_avant = set(index.values())
             for _row, infos in resultats:
                 for info in infos:
                     if info.svnaam:
                         trouver_ou_creer_colonne_dynamique_rup(ws_rup, index, info.svnaam, info.legende)
+            colonnes_nouvelles = set(index.values()) - colonnes_avant
+
+            if colonnes_nouvelles:
+                # Bug réel trouvé le 2026-09-26 (1371/2124 lignes de Sint-Truiden
+                # concernées) : une colonne créée ICI ne concernait jusqu'ici QUE
+                # les lignes de `resultats` (celles touchées par CE run) -- une
+                # ligne écrite par un run PRÉCÉDENT, jamais revisité depuis,
+                # restait vide sur cette colonne pour toujours, alors qu'on PEUT
+                # prouver qu'elle vaut "N" : une colonne n'est créée que pendant
+                # le traitement d'un lot dont au moins une ligne a cette zone
+                # dans ses résultats RUP déjà récupérés -- si elle n'existait pas
+                # encore au moment où une ligne PRÉCÉDENTE a été traitée (elle
+                # aussi via ce même mécanisme de réconciliation par lot), c'est
+                # la preuve que les infos RUP de cette ligne, déjà récupérées à
+                # l'époque, ne contenaient PAS cette zone. Remplit donc "N"
+                # d'abord sur TOUTES les lignes déjà écrites du fichier (pas
+                # seulement celles de ce run) ; la boucle suivante réécrit
+                # ensuite "O"/"N" correctement pour les lignes de CE run.
+                n_retro = 0
+                for r in range(FIRST_DATA_ROW, ws_rup.max_row + 1):
+                    if ws_rup.cell(row=r, column=1).value is None:
+                        continue
+                    for col in colonnes_nouvelles:
+                        if ws_rup.cell(row=r, column=col).value is None:
+                            ws_rup.cell(row=r, column=col, value="N")
+                            n_retro += 1
+                _logger.info(
+                    "%d nouvelle(s) colonne(s) RUP dynamique(s) : %d cellule(s) rétroactivement mise(s) à "
+                    "\"N\" sur des lignes de run(s) précédent(s).", len(colonnes_nouvelles), n_retro,
+                )
 
             for row, infos in resultats:
                 gagnantes = {index[info.svnaam] for info in infos if info.svnaam}

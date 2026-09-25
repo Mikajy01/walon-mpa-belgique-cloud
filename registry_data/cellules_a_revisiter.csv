@@ -1,1 +1,9 @@
 date,excel_path,commune,code_postal,rue,numero,capakey,x,y,colonne
+2026-09-25T08:37:06+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/3800_sint-truiden.xlsx,Sint-Truiden,3800,Pastoriestraat,/,167L,207210.31153846168,162960.0096067423,ET
+2026-09-25T09:12:54+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/3800_sint-truiden.xlsx,Sint-Truiden,3800,Perestraat,1,179P3,206600.3,166926.87,ET
+2026-09-25T09:12:54+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/3800_sint-truiden.xlsx,Sint-Truiden,3800,Perestraat,1,179P3,206600.3,166926.87,EU
+2026-09-25T09:19:45+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/3800_sint-truiden.xlsx,Sint-Truiden,3800,Perestraat,/,179C4,206638.7901427957,166860.54312767088,EU
+2026-09-25T09:19:45+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/3800_sint-truiden.xlsx,Sint-Truiden,3800,Perestraat,/,179C4,206638.7901427957,166860.54312767088,FC
+2026-09-25T09:40:32+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/3800_sint-truiden.xlsx,Sint-Truiden,3800,Perestraat,/,179Y,206645.011716745,166838.70067026373,ET
+2026-09-25T09:40:32+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/3800_sint-truiden.xlsx,Sint-Truiden,3800,Perestraat,/,179Y,206645.011716745,166838.70067026373,EU
+2026-09-25T09:40:32+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/3800_sint-truiden.xlsx,Sint-Truiden,3800,Perestraat,/,179Y,206645.011716745,166838.70067026373,FC

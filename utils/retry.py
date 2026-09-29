@@ -23,13 +23,18 @@ _logger = get_logger("utils.retry")
 
 def _est_reessayable(exc: BaseException) -> bool:
     """Erreurs considérées comme temporaires : timeouts, coupures de
-    connexion, réponses tronquées en cours de transfert, et erreurs
-    serveur 5xx (via `response.raise_for_status()`). Un HTTPError 4xx
-    (paramètres invalides, ressource introuvable) est définitif : la
-    même requête échouerait de façon identique à chaque tentative,
-    réessayer ne fait que perdre du temps sans jamais pouvoir réussir —
-    même raisonnement que project/utils/retry.py, confirmé par
-    l'incident réel PASH côté wallon."""
+    connexion, réponses tronquées en cours de transfert, erreurs serveur
+    5xx et 429 "Too Many Requests" (via `response.raise_for_status()`).
+    Un HTTPError 4xx autre que 429 (paramètres invalides, ressource
+    introuvable) est définitif : la même requête échouerait de façon
+    identique à chaque tentative, réessayer ne fait que perdre du temps
+    sans jamais pouvoir réussir -- même raisonnement que
+    project/utils/retry.py, confirmé par l'incident réel PASH côté
+    wallon. 429 est un cas à part (bug réel trouvé le 2026-09-29,
+    Wevelgem/Moorselestraat) : ça signifie littéralement "réessaie plus
+    tard", donc le traiter comme définitif faisait perdre TOUTE une rue
+    (main.py annule la découverte entière dès la première exception non
+    rattrapée) alors qu'une simple attente suffit presque toujours."""
     if isinstance(exc, (
         requests.exceptions.ConnectionError,
         requests.exceptions.Timeout,
@@ -39,7 +44,7 @@ def _est_reessayable(exc: BaseException) -> bool:
         return True
     if isinstance(exc, requests.exceptions.HTTPError):
         status = exc.response.status_code if exc.response is not None else None
-        return status is not None and status >= 500
+        return status is not None and (status >= 500 or status == 429)
     return False
 
 

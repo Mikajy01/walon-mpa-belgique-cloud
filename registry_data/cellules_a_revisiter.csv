@@ -4,16 +4,3 @@ date,excel_path,commune,code_postal,rue,numero,capakey,x,y,colonne
 2026-09-29T23:16:38+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/8560_wevelgem.xlsx,Wevelgem,8560,Moraviëstraat,/,918C16,68808.40045361369,168105.58012662735,EQ
 2026-09-29T23:16:38+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/8560_wevelgem.xlsx,Wevelgem,8560,Moraviëstraat,/,918C16,68808.40045361369,168105.58012662735,ER
 2026-09-29T23:16:38+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/8560_wevelgem.xlsx,Wevelgem,8560,Moraviëstraat,/,918C16,68808.40045361369,168105.58012662735,ES
-2026-09-30T11:37:04+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/2830_willebroek.xlsx,Willebroek,2830,Nieuw-Sloten,30,382B4,150640.81,193476.55,EU
-2026-09-30T11:37:21+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/2830_willebroek.xlsx,Willebroek,2830,Nieuw-Sloten,32,382C4,150634.98,193460.6,ET
-2026-09-30T11:37:21+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/2830_willebroek.xlsx,Willebroek,2830,Nieuw-Sloten,32,382C4,150634.98,193460.6,FC
-2026-09-30T11:39:00+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/2830_willebroek.xlsx,Willebroek,2830,Nieuw-Sloten,36,382E4,150620.91,193433.75,EU
-2026-09-30T11:39:16+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/2830_willebroek.xlsx,Willebroek,2830,Nieuw-Sloten,38,382E2,150623.4,193407.83,ET
-2026-09-30T11:42:29+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/2830_willebroek.xlsx,Willebroek,2830,Nieuw-Sloten,58,382T,150679.53,193318.22,ET
-2026-09-30T11:42:29+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/2830_willebroek.xlsx,Willebroek,2830,Nieuw-Sloten,58,382T,150679.53,193318.22,EU
-2026-09-30T11:43:00+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/2830_willebroek.xlsx,Willebroek,2830,Nieuw-Sloten,62,382R,150698.45,193295.37,ET
-2026-09-30T11:43:00+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/2830_willebroek.xlsx,Willebroek,2830,Nieuw-Sloten,62,382R,150698.45,193295.37,EU
-2026-09-30T13:22:09+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/2830_willebroek.xlsx,Willebroek,2830,Oostvaartdijk,75,149F2,149880.36,196361.05,FC
-2026-09-30T14:04:59+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/2830_willebroek.xlsx,Willebroek,2830,Oostzavelland,/,594P,149825.92228265322,193585.77349799685,FC
-2026-09-30T14:10:01+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/2830_willebroek.xlsx,Willebroek,2830,Oostzavelland,28,603S2,149868.66,193670.95,ET
-2026-09-30T14:10:22+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/2830_willebroek.xlsx,Willebroek,2830,Oostzavelland,30,603T2,149885.66,193680.71,FC

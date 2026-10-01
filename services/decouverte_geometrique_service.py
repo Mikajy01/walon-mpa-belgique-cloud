@@ -47,6 +47,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from models.parcelle import Parcelle
@@ -222,11 +223,23 @@ class DecouverteGeometrique:
 
     def parcelles_le_long(
         self, gemeentenaam: str, straatnaam: str, trace: Optional[Trace] = None,
+        deadline: Optional[datetime] = None,
     ) -> List[ParcelleLeLong]:
         """Parcelles bordant `straatnaam` (jusqu'à `rayon_m`), ordonnées (côté
         gauche puis droit, abscisse croissante). Liste vide si la rue est
         introuvable. `trace` : tracé déjà calculé par `tracer` (évite de le
-        refaire). Les erreurs réseau remontent."""
+        refaire). Les erreurs réseau remontent.
+
+        `deadline` (optionnel) : budget de temps du run en cours. Bug réel
+        trouvé le 2026-10-01 (commune "As") : pour une rue avec un tracé long
+        et beaucoup de parcelles, cette boucle fait UNE requête cadastre par
+        point échantillonné (potentiellement des dizaines), sans jamais
+        rendre la main -- un run peut rester bloqué ici des heures (le
+        cadastre fédéral belge est lent) jusqu'à être tué de force par le
+        plafond dur de GitHub Actions, perdant tout (aucun commit). Revérifié
+        ICI entre deux points échantillonnés : dépassé, on arrête
+        l'échantillonnage et on continue avec les candidates déjà trouvées
+        plutôt que de bloquer indéfiniment."""
         if trace is None:
             trace = self.tracer(gemeentenaam, straatnaam)
         if trace is None:
@@ -238,8 +251,21 @@ class DecouverteGeometrique:
         # Parcelles candidates : bbox autour de points échantillonnés
         candidates: Dict[str, Parcelle] = {}
         n_requetes = 0
+        budget_depasse = False
         for pts in chemin:
+            if budget_depasse:
+                break
             for (px, py) in _echantillonner(pts, _PAS_ECHANTILLON_M):
+                if deadline is not None and datetime.now(timezone.utc) >= deadline:
+                    _logger.warning(
+                        "Découverte géométrique '%s' : budget de temps dépassé EN COURS "
+                        "d'échantillonnage (%d requête(s) cadastre déjà faites, %d parcelle(s) "
+                        "candidate(s) trouvée(s)) -- arrêt de l'échantillonnage, continue avec ce "
+                        "qui est déjà trouvé ; relance le même traitement pour compléter.",
+                        straatnaam, n_requetes, len(candidates),
+                    )
+                    budget_depasse = True
+                    break
                 lon, lat = lambert72_vers_4258(px, py)
                 trouvees = self._cadastre.parcelles_autour(lat, lon, self._marge_bbox_m)
                 n_requetes += 1

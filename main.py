@@ -216,7 +216,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         capakeys_vers_lignes_rup = lire_capakeys_vers_lignes(ws_rup) if ws_rup is not None else {}
         _logger.info("Découverte de '%s' (%s)...", rue, args.commune)
         try:
-            parcelles = decouvrir_parcelles(args.commune, rue, adressen, cadastre, geometrique)
+            parcelles = decouvrir_parcelles(args.commune, rue, adressen, cadastre, geometrique, deadline=deadline)
         except Exception as exc:  # noqa: BLE001 -- une rue entière ne doit jamais faire planter
             # tout le run (les autres rues déjà traitées restent sauvegardées) -- incident réel
             # du 2026-09-19 : le cadastre fédéral belge (host connu pour être capricieux) a fait

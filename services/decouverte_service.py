@@ -34,6 +34,7 @@ inventer un faux numéro de maison."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from models.adresse import AdresseBE
@@ -60,7 +61,7 @@ class ParcelleTrouvee:
 
 def decouvrir_parcelles(
     gemeentenaam: str, straatnaam: str, adressen: AdressenService, cadastre: CadastreService,
-    geometrique: Optional[DecouverteGeometrique] = None,
+    geometrique: Optional[DecouverteGeometrique] = None, deadline: Optional[datetime] = None,
 ) -> List[ParcelleTrouvee]:
     """Découvre et ordonne les parcelles de `straatnaam` (`gemeentenaam`).
     Sans `geometrique` : un côté d'abord (numéros impairs), puis l'autre,
@@ -70,7 +71,19 @@ def decouvrir_parcelles(
     parcelles (avec ou sans numéro) sont ordonnées le long de la rue, un côté
     d'abord puis l'autre, dans l'ordre d'apparition (`_ordonner_le_long`,
     demande du 2026-09-21) ; repli sur l'ordre pair/impair si le tracé de la
-    rue est indisponible."""
+    rue est indisponible.
+
+    `deadline` (optionnel) : budget de temps du run en cours (main.py). Bug
+    réel trouvé le 2026-10-01 (commune "As", run tué par le plafond dur de 6h
+    de GitHub Actions, AUCUN commit -- même les petites rues déjà traitées
+    perdues) : la vérification de budget dans main.py ne se fait QU'entre
+    deux rues, jamais PENDANT la découverte d'une seule rue -- une rue avec
+    énormément d'adresses (donc beaucoup d'appels au cadastre fédéral, lent)
+    peut bloquer cette fonction pendant des heures sans aucune occasion de
+    s'arrêter proprement. `deadline` est donc revérifié ICI, à l'intérieur
+    même de la découverte, pour pouvoir rendre un résultat PARTIEL (plutôt
+    que de bloquer indéfiniment) dès qu'il est dépassé -- l'appelant peut
+    alors sauvegarder ce qui est déjà trouvé et s'arrêter proprement."""
     adresses = adressen.lister_adresses(gemeentenaam, straatnaam)
     if not adresses:
         _logger.warning("Aucune adresse trouvée pour '%s' (%s).", straatnaam, gemeentenaam)
@@ -96,7 +109,17 @@ def decouvrir_parcelles(
 
     trouvees: List[ParcelleTrouvee] = []
     references_emises: set = set()
+    budget_depasse = False
     for cle, groupe in par_parcelle.items():
+        if deadline is not None and datetime.now(timezone.utc) >= deadline:
+            _logger.warning(
+                "'%s' (%s) : budget de temps dépassé EN COURS de découverte (%d/%d adresse(s) "
+                "traitée(s)) -- résultat partiel renvoyé, pas de parcelles géométriques pour ce "
+                "run ; relance le même traitement pour reprendre.",
+                straatnaam, gemeentenaam, len(trouvees), len(par_parcelle),
+            )
+            budget_depasse = True
+            break
         groupe.sort(key=lambda a: a.numero)
         premiere = groupe[0]
         try:
@@ -147,7 +170,7 @@ def decouvrir_parcelles(
     # -- Tracé de la rue + parcelles SANS adresse le long de la route -------
     trace: Optional[Trace] = None
     le_long: list = []
-    if geometrique is not None:
+    if geometrique is not None and not budget_depasse:
         # Position d'une adresse CONNUE de cette rue (même sans parcelle liée, voir
         # AdresseBE plus haut) -- sert de point de référence au repli par nom du
         # Wegenregister (écart réel Knesselare, voir wegenregister_service.py) : sans
@@ -163,7 +186,7 @@ def decouvrir_parcelles(
             )
         if trace is not None:
             try:
-                le_long = geometrique.parcelles_le_long(gemeentenaam, straatnaam, trace)
+                le_long = geometrique.parcelles_le_long(gemeentenaam, straatnaam, trace, deadline=deadline)
             except Exception as exc:  # noqa: BLE001
                 _logger.warning(
                     "Découverte géométrique de '%s' (%s) a échoué (%s: %s) -- seules les parcelles liées à une "

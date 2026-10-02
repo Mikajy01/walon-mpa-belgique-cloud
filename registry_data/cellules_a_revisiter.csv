@@ -4,13 +4,4 @@ date,excel_path,commune,code_postal,rue,numero,capakey,x,y,colonne
 2026-09-29T23:16:38+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/8560_wevelgem.xlsx,Wevelgem,8560,Moraviëstraat,/,918C16,68808.40045361369,168105.58012662735,EQ
 2026-09-29T23:16:38+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/8560_wevelgem.xlsx,Wevelgem,8560,Moraviëstraat,/,918C16,68808.40045361369,168105.58012662735,ER
 2026-09-29T23:16:38+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/8560_wevelgem.xlsx,Wevelgem,8560,Moraviëstraat,/,918C16,68808.40045361369,168105.58012662735,ES
-2026-10-02T10:22:13+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/8400_oostende.xlsx,Oostende,8400,Libellaan,5,490K,52081.21,211227.6,EB
-2026-10-02T10:22:48+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/8400_oostende.xlsx,Oostende,8400,Libellaan,13,495S,52009.14,211236.89,EB
-2026-10-02T10:23:24+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/8400_oostende.xlsx,Oostende,8400,Libellaan,/,495Y,51912.943639033285,211242.2717902558,EB
-2026-10-02T10:23:57+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/8400_oostende.xlsx,Oostende,8400,Libellaan,/,495A2,51918.825756454346,211259.1058900822,EB
-2026-10-02T10:24:32+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/8400_oostende.xlsx,Oostende,8400,Libellaan,2,490Z,52128.78,211179.0,EB
-2026-10-02T10:25:06+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/8400_oostende.xlsx,Oostende,8400,Libellaan,/,490S,52129.892054438445,211162.39708753675,EB
-2026-10-02T10:25:40+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/8400_oostende.xlsx,Oostende,8400,Libellaan,/,490F,52136.05929651632,211140.34338431899,EB
-2026-10-02T10:26:13+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/8400_oostende.xlsx,Oostende,8400,Libellaan,/,490P,52143.548516044946,211077.04972820356,EB
-2026-10-02T10:26:45+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/8400_oostende.xlsx,Oostende,8400,Libellaan,/,490Y,52115.350130582025,211062.87134363595,EB
-2026-10-02T10:27:19+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/8400_oostende.xlsx,Oostende,8400,Libellaan,/,490R,52140.07835990998,211119.08482082468,EB
+2026-10-02T17:16:05+00:00,/home/runner/work/walon-mpa-belgique-cloud/walon-mpa-belgique-cloud/state/8400_oostende.xlsx,Oostende,8400,Libellaan,/,494S,51956.05336116749,211177.41233361233,FF

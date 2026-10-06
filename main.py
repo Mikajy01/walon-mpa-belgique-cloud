@@ -56,6 +56,23 @@ from utils.rate_limiter import RateLimiter
 
 _logger = get_logger("main")
 
+# Incident réel 2026-10-06 (commune "Torhout") : 2 runs consécutifs (budget
+# correct cette fois) ont épuisé leurs 5h30 ENTIÈREMENT à l'intérieur de
+# `decouvrir_parcelles()` (cadastre fédéral/registre d'adresses dégradés sur
+# ces créneaux) sans écrire UNE SEULE ligne -- la boucle d'écriture
+# réutilisait le même `deadline` déjà dépassé au retour de la découverte,
+# donc sa toute première vérification arrêtait tout avant même d'écrire les
+# parcelles DÉJÀ trouvées. Pire : comme rien n'est jamais marqué "déjà
+# écrit", CHAQUE run suivant répète exactement le même échec indéfiniment.
+# `_GRACE_ECRITURE` donne à la boucle d'écriture (qui ne refait AUCUN appel
+# réseau coûteux au cadastre, seulement `resolveur.resoudre()` + sauvegarde
+# locale) un délai supplémentaire pour écrire ce qui a déjà été découvert,
+# sans jamais retarder l'arrêt de la découverte elle-même ni le démarrage
+# d'une rue neuve (qui continuent d'utiliser `deadline` sans grâce). Pris
+# sur la marge de 30 min déjà réservée entre --budget-heures et le plafond
+# dur de GitHub Actions (voir .github/workflows/traiter_commune.yml).
+_GRACE_ECRITURE = timedelta(minutes=15)
+
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Pipeline Flandre (Belgique).")
@@ -188,6 +205,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     rues = [r.strip() for r in re.split(r"[,\n]", args.rues) if r.strip()]
 
     deadline = datetime.now(timezone.utc) + timedelta(hours=args.budget_heures)
+    deadline_ecriture = deadline + _GRACE_ECRITURE
     incomplet = False
 
     # Accumulé sur TOUTES les rues de ce run (neuves ET déjà écrites) --
@@ -252,11 +270,16 @@ def main(argv: Optional[List[str]] = None) -> int:
                         a = p.adresses[0]
                         suivi_reconciliation_rup.append((ligne_rup, a.x, a.y))
                 continue
-            if datetime.now(timezone.utc) >= deadline:
+            if datetime.now(timezone.utc) >= deadline_ecriture:
+                # `deadline_ecriture` (pas `deadline`) -- voir _GRACE_ECRITURE : ces
+                # parcelles sont déjà DÉCOUVERTES (le coûteux appel réseau est fait),
+                # il ne reste que resolveur.resoudre() + sauvegarde locale, jamais
+                # perdre ce travail déjà fait faute d'un délai de grâce suffisant.
                 _logger.warning(
-                    "Budget de temps (%.1fh) atteint EN COURS de '%s' -- %d/%d parcelle(s) de cette rue "
-                    "traitée(s), le reste (et les rues suivantes) reporté au prochain run.",
-                    args.budget_heures, rue, n_ecrites_rue, len(parcelles),
+                    "Budget de temps (%.1fh + %d min de grâce) atteint EN COURS de '%s' -- %d/%d "
+                    "parcelle(s) de cette rue traitée(s), le reste (et les rues suivantes) reporté "
+                    "au prochain run.",
+                    args.budget_heures, _GRACE_ECRITURE.seconds // 60, rue, n_ecrites_rue, len(parcelles),
                 )
                 incomplet = True
                 break

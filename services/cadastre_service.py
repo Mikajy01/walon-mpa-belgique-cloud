@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import math
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 import pyproj
@@ -58,6 +59,19 @@ _TRANSFORMER_4258_VERS_L72 = pyproj.Transformer.from_crs("EPSG:4258", "EPSG:3137
 # filet de sécurité, jamais le cas normal.
 _MARGES_RECHERCHE_M = (100.0, 300.0, 1000.0)
 
+# Disjoncteur ("circuit breaker") pour le repli fédéral -> Adpf (voir
+# `_chercher_par_bbox`) -- demande explicite de l'utilisateur du 2026-10-07 :
+# retenter le fédéral (5 tentatives, ~15-25s de backoff) à CHAQUE parcelle
+# ferait exploser la durée d'un run pendant une panne prolongée (ex.
+# Menenstraat, 686 parcelles x ~20s = plus de 3h perdues en retries, pour
+# une seule rue). Une fois le fédéral détecté en panne, il est ignoré
+# pendant `_COOLDOWN_FEDERAL` (repli direct sur Adpf, sans retenter), puis
+# une seule tentative de "sonde" est refaite -- pas par rue (une seule très
+# grosse rue suffirait à épuiser tout le budget avant le prochain
+# changement de rue), un délai fixe s'adapte à n'importe quelle taille de
+# rue.
+_COOLDOWN_FEDERAL = timedelta(minutes=5)
+
 
 def lambert72_vers_4258(x: float, y: float) -> tuple[float, float]:
     """Reprojette un point Lambert 72 (EPSG:31370, x/y) vers EPSG:4258
@@ -88,6 +102,9 @@ def _base_parcelle(reference: str) -> Optional[str]:
 class CadastreService:
     def __init__(self, http: HttpClient) -> None:
         self._http = http
+        # État du disjoncteur fédéral -> Adpf (voir _COOLDOWN_FEDERAL) --
+        # `None` = fédéral considéré sain, pas (encore) de raison de le sauter.
+        self._federal_en_panne_depuis: Optional[datetime] = None
 
     @staticmethod
     def _bbox(lat: float, lon: float, marge_m: float, crs: str = "EPSG::4258") -> str:
@@ -153,6 +170,15 @@ class CadastreService:
         return self._chercher_par_bbox(lat, lon, marge_m)
 
     def _chercher_par_bbox(self, lat: float, lon: float, marge_m: float) -> List[Parcelle]:
+        maintenant = datetime.now(timezone.utc)
+        if self._federal_en_panne_depuis is not None:
+            if maintenant - self._federal_en_panne_depuis < _COOLDOWN_FEDERAL:
+                # Disjoncteur ouvert : saute le fédéral SANS même l'essayer (voir
+                # _COOLDOWN_FEDERAL -- jamais 5 tentatives/~20s par parcelle pendant
+                # une panne prolongée, ça exploserait la durée d'une grosse rue).
+                return self._chercher_par_bbox_adpf(lat, lon, marge_m)
+            _logger.info("Disjoncteur cadastre fédéral : fin du cooldown, nouvelle sonde.")
+
         params = {
             "service": "WFS", "version": "2.0.0", "request": "GetFeature",
             "typeNames": "cp:CadastralParcel", "count": 200,
@@ -160,7 +186,11 @@ class CadastreService:
         }
         try:
             xml = self._http.get_text(config.CADASTRE_WFS_BASE, params, service_key="cadastre_be")
-            return self._parser_membres(xml)
+            resultat = self._parser_membres(xml)
+            if self._federal_en_panne_depuis is not None:
+                _logger.info("Cadastre fédéral de nouveau disponible -- disjoncteur refermé.")
+                self._federal_en_panne_depuis = None
+            return resultat
         except Exception as exc:  # noqa: BLE001 -- incident réel 2026-10-06/07 : le serveur fédéral
             # est tombé en panne (OutOfMemoryError côté serveur) plus de 24h d'affilée. Plutôt que de
             # faire échouer TOUTE la découverte en attendant un service dont on ne contrôle pas le
@@ -170,8 +200,10 @@ class CadastreService:
             # l'appel fédéral lui-même).
             _logger.warning(
                 "Cadastre fédéral indisponible (%s: %s) -- repli sur le service flamand équivalent "
-                "(GRB Adpf).", type(exc).__name__, exc,
+                "(GRB Adpf), disjoncteur ouvert pour %d min.",
+                type(exc).__name__, exc, _COOLDOWN_FEDERAL.seconds // 60,
             )
+            self._federal_en_panne_depuis = maintenant
             return self._chercher_par_bbox_adpf(lat, lon, marge_m)
 
     def _chercher_par_bbox_adpf(self, lat: float, lon: float, marge_m: float) -> List[Parcelle]:

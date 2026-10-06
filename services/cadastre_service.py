@@ -90,10 +90,10 @@ class CadastreService:
         self._http = http
 
     @staticmethod
-    def _bbox(lat: float, lon: float, marge_m: float) -> str:
+    def _bbox(lat: float, lon: float, marge_m: float, crs: str = "EPSG::4258") -> str:
         dlat = marge_m / 111320
         dlon = marge_m / (111320 * math.cos(math.radians(lat)))
-        return f"{lat - dlat},{lon - dlon},{lat + dlat},{lon + dlon},urn:ogc:def:crs:EPSG::4258"
+        return f"{lat - dlat},{lon - dlon},{lat + dlat},{lon + dlon},urn:ogc:def:crs:{crs}"
 
     def get_parcelle(self, reference: str, lat: float, lon: float) -> Optional[Parcelle]:
         """Récupère la géométrie de la parcelle `reference` (caPaKey,
@@ -153,14 +153,39 @@ class CadastreService:
         return self._chercher_par_bbox(lat, lon, marge_m)
 
     def _chercher_par_bbox(self, lat: float, lon: float, marge_m: float) -> List[Parcelle]:
-        url = config.CADASTRE_WFS_BASE
         params = {
             "service": "WFS", "version": "2.0.0", "request": "GetFeature",
             "typeNames": "cp:CadastralParcel", "count": 200,
             "BBOX": self._bbox(lat, lon, marge_m),
         }
-        xml = self._http.get_text(url, params, service_key="cadastre_be")
-        return self._parser_membres(xml)
+        try:
+            xml = self._http.get_text(config.CADASTRE_WFS_BASE, params, service_key="cadastre_be")
+            return self._parser_membres(xml)
+        except Exception as exc:  # noqa: BLE001 -- incident réel 2026-10-06/07 : le serveur fédéral
+            # est tombé en panne (OutOfMemoryError côté serveur) plus de 24h d'affilée. Plutôt que de
+            # faire échouer TOUTE la découverte en attendant un service dont on ne contrôle pas le
+            # retour, repli automatique sur le service flamand équivalent (voir config.py,
+            # CADASTRE_ADPF_WFS_BASE) -- mêmes caPaKey, infrastructure séparée. Jamais silencieux :
+            # journalisé une seule fois par appel, pas par tentative (déjà fait par http_retry sur
+            # l'appel fédéral lui-même).
+            _logger.warning(
+                "Cadastre fédéral indisponible (%s: %s) -- repli sur le service flamand équivalent "
+                "(GRB Adpf).", type(exc).__name__, exc,
+            )
+            return self._chercher_par_bbox_adpf(lat, lon, marge_m)
+
+    def _chercher_par_bbox_adpf(self, lat: float, lon: float, marge_m: float) -> List[Parcelle]:
+        """Repli : même principe que `_chercher_par_bbox`, mais sur le WFS flamand
+        `CADASTRE_ADPF_WFS_BASE` (voir config.py) -- structure de réponse différente
+        (`Adpf:Adpf`/`Adpf:CAPAKEY`/`Adpf:SHAPE`, CRS natif EPSG:31370), voir
+        `_parser_membres_adpf`."""
+        params = {
+            "service": "WFS", "version": "2.0.0", "request": "GetFeature",
+            "typeNames": "Adpf:Adpf", "count": 200,
+            "BBOX": self._bbox(lat, lon, marge_m, crs="EPSG::4326"),
+        }
+        xml = self._http.get_text(config.CADASTRE_ADPF_WFS_BASE, params, service_key="cadastre_adpf_be")
+        return self._parser_membres_adpf(xml)
 
     @staticmethod
     def _parser_membres(xml: str) -> List[Parcelle]:
@@ -198,6 +223,49 @@ class CadastreService:
             valeurs = [float(v) for v in anneau_texte.split()]
             paires = list(zip(valeurs[0::2], valeurs[1::2]))  # (lat, lon)
             anneau = [[lon, lat] for lat, lon in paires]
+            polygones.append([anneau])
+        if len(polygones) == 1:
+            return {"type": "Polygon", "coordinates": polygones[0]}
+        return {"type": "MultiPolygon", "coordinates": polygones}
+
+    @staticmethod
+    def _parser_membres_adpf(xml: str) -> List[Parcelle]:
+        """Comme `_parser_membres`, pour le format du WFS de repli (voir
+        config.py, `CADASTRE_ADPF_WFS_BASE`) : membres `<Adpf:Adpf>`,
+        référence dans `<Adpf:CAPAKEY>` (même convention caPaKey que le
+        fédéral, vérifié en direct), pas de champ d'aire exploité (`area`
+        n'est utilisé nulle part dans le reste du pipeline -- laissé à
+        `None`)."""
+        parcelles: List[Parcelle] = []
+        membres = xml.split("<wfs:member>")[1:]
+        for bloc in membres:
+            m_ref = re.search(r"<Adpf:CAPAKEY>([^<]*)</Adpf:CAPAKEY>", bloc)
+            if not m_ref:
+                continue
+            reference = m_ref.group(1).strip()
+            geometry = CadastreService._parser_geometrie_adpf(bloc)
+            parcelles.append(Parcelle(reference=reference, geometry=geometry, area=None))
+        return parcelles
+
+    @staticmethod
+    def _parser_geometrie_adpf(bloc: str) -> Optional[Dict]:
+        """Convertit le(s) `gml:posList` du `<Adpf:SHAPE>` -- CRS NATIF
+        EPSG:31370 (Lambert 72, ordre x,y -- confirmé en direct, valeurs
+        dans la plage attendue pour la Belgique), PAS EPSG:4258 comme le
+        fédéral -- reprojeté point par point vers EPSG:4258 (lon,lat) via
+        `lambert72_vers_4258`, pour que `Parcelle.geometry` garde EXACTEMENT
+        la même convention quelle que soit la source ayant répondu, et que
+        tout le reste du pipeline (déjà écrit pour le fédéral) n'ait rien à
+        changer. Même hypothèse qu'ailleurs : un seul anneau extérieur par
+        polygone, pas de trou géré."""
+        anneaux = _RE_POSLIST.findall(bloc)
+        if not anneaux:
+            return None
+        polygones = []
+        for anneau_texte in anneaux:
+            valeurs = [float(v) for v in anneau_texte.split()]
+            paires_l72 = list(zip(valeurs[0::2], valeurs[1::2]))  # (x, y) Lambert 72
+            anneau = [list(lambert72_vers_4258(x, y)) for x, y in paires_l72]  # [lon, lat]
             polygones.append([anneau])
         if len(polygones) == 1:
             return {"type": "Polygon", "coordinates": polygones[0]}

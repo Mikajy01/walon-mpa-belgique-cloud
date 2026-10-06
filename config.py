@@ -64,6 +64,20 @@ CADASTRE_WFS_BASE = (
     "INSPIRE/CP/MapServer/exts/InspireFeatureDownload/service"
 )
 
+# Repli AUTOMATIQUE quand le service ci-dessus échoue -- incident réel
+# 2026-10-06/07 : le serveur fédéral est tombé en panne plus de 24h
+# d'affilée (java.lang.OutOfMemoryError côté serveur, confirmé via
+# GetCapabilities). Service FLAMAND équivalent trouvé en vérifiant
+# l'incident : "GRB - Administratieve percelen fiscaal" (Informatie
+# Vlaanderen), géométrie des parcelles administratives qui CORRESPOND à
+# celle des parcelles cadastrales gérées par l'AGDP/AAPD (même autorité
+# que le WFS fédéral) -- infrastructure séparée, testé opérationnel
+# pendant la panne fédérale, même convention caPaKey EXACTE (confirmé en
+# direct : "31523F0581/00G000" retrouvé identique sur les deux services
+# pour le même point). CRS natif EPSG:31370 (Lambert 72) -- pas de
+# reprojection nécessaire pour la requête (contrairement au fédéral).
+CADASTRE_ADPF_WFS_BASE = "https://geo.api.vlaanderen.be/Adpf/wfs"
+
 # WFS Mercator (Departement Omgeving / Informatie Vlaanderen) — héberge
 # Gewestplan (lu:lu_gwp_gv, VECTEUR — pas lu_gwp_rv_raster) et les 3
 # niveaux de RUP (lu:lu_gewrup_gv région, lu:lu_provrup_gv province,

@@ -146,6 +146,19 @@ class HttpClient:
         response.raise_for_status()
         texte = response.text
 
+        # Bug réel trouvé le 2026-10-06 (cadastre fédéral belge) : un service WFS/OWS
+        # peut renvoyer une erreur ("ExceptionReport"/"ServiceExceptionReport" -- formats
+        # standards OGC pour WFS 2.0/1.x) avec un code HTTP 200 -- `raise_for_status()`
+        # ne la détecte PAS (ce n'est pas un code 4xx/5xx). Sans ce contrôle, le texte
+        # d'erreur était mis en cache et parsé comme une réponse VALIDE mais vide (0
+        # parcelle/zone trouvée), sans jamais lever d'erreur ni logger d'avertissement --
+        # silencieusement indiscernable d'une vraie absence de données. Vérifié ICI, avant
+        # la mise en cache (une erreur transitoire ne doit jamais rester bloquée en cache),
+        # pour TOUS les services WFS du projet (cadastre, Gewestplan, RUP, watertoets...),
+        # qui passent tous par cette même méthode.
+        if "ExceptionReport" in texte:
+            raise ApiServiceTransientError(f"{url} -> réponse WFS en erreur (ExceptionReport) : {texte[:300]}")
+
         if self._use_cache:
             self._cache.set(url, params, texte)
         return texte

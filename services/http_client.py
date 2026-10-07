@@ -134,7 +134,22 @@ class HttpClient:
         nécessaire côté `HttpCache`."""
         if self._use_cache:
             cached = self._cache.get(url, params)
-            if cached is not None:
+            # Bug réel trouvé le 2026-10-07 (commune "Torhout") : AVANT le
+            # contrôle ExceptionReport ajouté plus tôt aujourd'hui, une réponse
+            # WFS en erreur (ex. pendant la panne du cadastre fédéral) a été mise
+            # en cache comme si c'était une réponse valide -- le cache HTTP n'a
+            # AUCUNE expiration (voir cache_service.py), et le workflow GitHub
+            # Actions restaure le cache de N'IMPORTE QUEL run précédent sur la
+            # même commune (`restore-keys` par préfixe, pas par run_id exact).
+            # Résultat : des runs ENTIERS passaient quasi instantanément (donc
+            # "réussis" en quelques minutes) en relisant silencieusement ces
+            # vieilles erreurs déjà en cache comme des réponses vides valides --
+            # jamais de nouvelle requête, jamais d'exception, jamais de repli.
+            # Un cache déjà pollué AVANT ce contrôle doit aussi être soigné ici,
+            # pas seulement les nouvelles écritures (voir plus bas) -- sinon le
+            # correctif ne protège que les erreurs FUTURES, jamais celles déjà
+            # enregistrées.
+            if cached is not None and "ExceptionReport" not in cached:
                 return cached
 
         self._rate_limiter.wait()

@@ -26,6 +26,15 @@ LOGS_DIR = BASE_DIR / "logs"
 REGISTRY_DIR = BASE_DIR / "registry_data"
 STATE_DIR = BASE_DIR / "state"
 
+# Chantier RUP-seul (2026-10-07, voir le plan) : gabarit à une seule
+# feuille ("Nom de RUP" + identité + 3 niveaux RUP + zones dynamiques),
+# structure confirmée sur `Exemplaire.xlsx` (commune Aartselaar, exemple
+# réel rempli par l'équipe) — totalement séparé du gabarit à 190 colonnes
+# ci-dessus, jamais utilisé par main.py. Le cache PDF (rup_pdf_service.py)
+# vit dans un sous-dossier de --cache-dir (voir main_rup.py), pas ici --
+# doit respecter le même override que le reste du cache HTTP.
+TEMPLATE_RUP_PATH = BASE_DIR / "templates" / "gabarit_rup.xlsx"
+
 # Fichier de suivi (CSV, append-only) des cellules ayant échoué et à
 # retenter — même motif que côté France (voir main.py::reessayer_cellules_*),
 # PARTAGÉ entre toutes les communes traitées.

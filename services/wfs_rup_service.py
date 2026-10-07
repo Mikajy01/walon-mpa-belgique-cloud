@@ -90,6 +90,7 @@ class InfoRup:
     categorie: str  # code court, ex. "WON"
     legende: str  # description littérale de la couleur du plan graphique, ex. "rood met licht groen"
     fichelink: str  # URL exacte vers la fiche RUP (dsi.omgeving.vlaanderen.be)
+    svidlink: str  # URL directe vers la page du PDF "Stedenbouwkundige voorschriften" contenant le texte légal de cette zone (ex. "...#page=10"), chantier RUP-seul du 2026-10-07
 
 
 class WfsRupService:
@@ -128,6 +129,7 @@ class WfsRupService:
             m_cat = re.search(r"<lu:categorie>([^<]*)</lu:categorie>", bloc)
             m_leg = re.search(r"<lu:legende>([^<]*)</lu:legende>", bloc)
             m_lien = re.search(r"<lu:fichelink>([^<]*)</lu:fichelink>", bloc)
+            m_svidlink = re.search(r"<lu:svidlink>([^<]*)</lu:svidlink>", bloc)
             if m_lien is None or m_algplanid is None:
                 _logger.warning("Couche '%s' : membre sans 'fichelink'/'algplanid' exploitable, ignoré.", layer)
                 continue
@@ -139,6 +141,7 @@ class WfsRupService:
                 categorie=(m_cat.group(1).strip() if m_cat else ""),
                 legende=(m_leg.group(1).strip() if m_leg else ""),
                 fichelink=m_lien.group(1).strip(),
+                svidlink=(m_svidlink.group(1).strip() if m_svidlink else ""),
             ))
         return resultats
 

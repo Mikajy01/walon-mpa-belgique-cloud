@@ -104,6 +104,30 @@ class AdressenService:
             gemeentenaam=gemeentenaam, x=x, y=y, capakeys=capakeys, postcode=postcode,
         )
 
+    def lister_toutes_rues(self, gemeentenaam: str) -> List[str]:
+        """Liste COMPLÈTE des noms de rue officiels d'une commune --
+        paginée via `volgende` (même motif que `lister_adresses` ci-
+        dessus). Portée depuis `gui/main.py::_lister_toutes_rues`
+        (chantier RUP-seul du 2026-10-07, voir le plan) : la nouvelle
+        consigne donne SEULEMENT une commune, il faut découvrir
+        soi-même toutes ses rues plutôt que recevoir une liste."""
+        url = f"{config.ADRESSENREGISTER_BASE}/straatnamen"
+        params = {"gemeentenaam": gemeentenaam, "limit": 100}
+        noms: List[str] = []
+        url_courante: Optional[str] = url
+        params_courants: Optional[dict] = params
+        while url_courante is not None:
+            data = self._http.get_json(url_courante, params_courants, service_key="adressenregister")
+            for entree in data.get("straatnamen", []):
+                noms.append(entree["straatnaam"]["geografischeNaam"]["spelling"])
+            volgende = data.get("volgende")
+            if volgende:
+                url_courante, params_courants = volgende, None
+            else:
+                url_courante = None
+        _logger.info("Adressenregister : %d rue(s) officielle(s) trouvée(s) pour '%s'.", len(noms), gemeentenaam)
+        return noms
+
     def _capakeys_pour_adresse(self, object_id: str) -> List[str]:
         """Le lien OFFICIEL adresse->parcelle(s) — voir le docstring du
         module. Une adresse peut être liée à plusieurs parcelles (ex. un

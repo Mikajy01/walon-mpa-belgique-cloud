@@ -157,13 +157,24 @@ def _get(erreurs: Set[str], colonnes: Sequence[str], nom: str, fn: Callable[[], 
 def _colonne_resiliente(
     valeurs: Dict[str, str], erreurs: Set[str], lettre: str, nom: str, fn: Callable[[], Optional[str]],
 ) -> None:
-    """Équivalent résilient de `v = fn(); if v is not None: valeurs[lettre] = v`
-    -- voir `_get`."""
+    """Équivalent résilient de `v = fn(); valeurs[lettre] = v if v is not None else "N"`
+    -- voir `_get`.
+
+    Bug réel trouvé le 2026-10-07 (commune "Lokeren", 610 cellules vides sur
+    EN/GH) : cette fonction GÉNÉRIQUE (des dizaines de colonnes -- watertoets,
+    landinrichting, woningbouw, advieskaart...) avait le MÊME défaut que
+    EN/DW/FB corrigés en inline le 2026-09-24 -- `elif v is not None` sans
+    `else`, donc un `None` légitime (vraie absence de correspondance WFS,
+    jamais une erreur réseau -- voir `_get`) laissait la cellule
+    COMPLÈTEMENT VIDE au lieu de "N". Le correctif du 2026-09-24 n'avait
+    corrigé que des occurrences EN LIGNE, jamais cette fonction partagée --
+    donc le même bug continuait de s'appliquer à TOUTE colonne routée par
+    ici, silencieusement, sur n'importe quelle commune traitée depuis."""
     v = _get(erreurs, (lettre,), nom, fn)
     if v is _ERREUR:
         valeurs[lettre] = "ERREUR"
-    elif v is not None:
-        valeurs[lettre] = v
+    else:
+        valeurs[lettre] = v if v is not None else "N"
 
 
 def _un_parmi_resilient(

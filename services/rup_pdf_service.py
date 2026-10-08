@@ -45,12 +45,18 @@ réécriture. Approche robuste retenue, sans aucune constante absolue :
 
 La section "Bestemming" n'est PAS forcément libellée exactement
 "Bestemming" (variantes réelles vues dans `Exemplaire.xlsx` :
-"Bestemming en bebouwing", "Bestemmingsvoorschriften", "2.1
-Bestemming") -- on cherche le premier titre dont le texte, une fois une
-éventuelle numérotation ("2.1 ", "3.", ...) retirée, commence par
-"bestemming" (insensible à la casse), et on capture tout jusqu'au
-PROCHAIN titre rencontré (qui peut être sur la page suivante -- voir le
-cas réel Aartselaar où la section continue jusqu'à juste avant
+"Bestemming en bebouwing", "Bestemmingsvoorschriften") ni dans le même
+format d'un dossier à l'autre (Avelgem : "2.1 Bestemming", avec
+numérotation) -- on cherche le premier titre dont le texte, une fois
+une éventuelle numérotation ("2.1 ", "3.", ...) retirée, commence par
+"bestemming" (insensible à la casse). Cette numérotation est retirée
+du texte CAPTURÉ aussi, pas seulement pour la détection -- confirmé en
+direct sur les 16 colonnes de l'Exemplaire (référence autoritative,
+voir le plan) : AUCUNE n'a de numéro en tête, toujours juste
+"Bestemming..."/"Bestemmingsvoorschriften...", jamais "2.1
+Bestemming...". On capture tout jusqu'au PROCHAIN titre rencontré
+(qui peut être sur la page suivante -- voir le cas réel Aartselaar où
+la section continue jusqu'à juste avant
 "Inrichting" en haut de la page suivante) -- jamais une distance de
 page fixe, toujours le prochain titre réel."""
 
@@ -175,9 +181,10 @@ class RupPdfService:
                 if est_titre:
                     if capture:
                         return "\n".join(morceaux).strip()
-                    if _RE_NUMEROTATION.sub("", texte.strip()).lower().startswith("bestemming"):
+                    titre_sans_numero = _RE_NUMEROTATION.sub("", texte.strip())
+                    if titre_sans_numero.lower().startswith("bestemming"):
                         capture = True
-                        morceaux = [texte.strip()]
+                        morceaux = [titre_sans_numero]
                     continue
                 if capture:
                     morceaux.append(texte.strip())

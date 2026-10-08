@@ -32,7 +32,7 @@ import shutil
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Tuple
 
 import requests
 
@@ -188,6 +188,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     groupe_cle = lire_cle_groupe(ws, derniere_ligne)
     groupe_debut = debut_groupe_existant(ws, derniere_ligne) if derniere_ligne >= FIRST_DATA_ROW else None
     index_dyn = index_colonnes_dynamiques(ws)
+    colonnes_dyn_avant_run = set(index_dyn.values())
+
+    # Suivi (row, infos RUP déjà récupérées) de CHAQUE ligne écrite dans ce
+    # run -- nécessaire pour la réconciliation finale des colonnes
+    # dynamiques (voir plus bas) : une colonne découverte en traitant la
+    # 300e ligne doit aussi être backfillée "N" pour les 299 précédentes de
+    # CE run (même bug déjà trouvé et corrigé dans main.py le 2026-09-26,
+    # jamais porté ici -- voir le commentaire de la réconciliation ci-bas).
+    suivi_zones: List[Tuple[int, List[InfoRup]]] = []
 
     for rue in rues_a_faire:
         if datetime.now(timezone.utc) >= deadline:
@@ -270,6 +279,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     trouver_ou_creer_colonne_dynamique(ws, index_dyn, info.svnaam, info.legende, bestemming or "")
             gagnantes = {index_dyn[i.svnaam] for i in toutes_infos if i.svnaam}
             ecrire_zones_dynamiques(ws, row, index_dyn, gagnantes)
+            suivi_zones.append((row, toutes_infos))
 
             sauvegarder(wb, excel_path)
             wb = charger_classeur(excel_path)
@@ -287,6 +297,55 @@ def main(argv: Optional[List[str]] = None) -> int:
             marquer_rue_traitee(chemin_traitees, rue)
         else:
             incomplet = True
+
+    # -- Réconciliation des colonnes RUP dynamiques -------------------------
+    # BUG RÉEL trouvé le 2026-10-08 (fichier Avelgem réel, cellules vides en
+    # nombre croissant sur les colonnes découvertes tard dans le run) : même
+    # bug déjà trouvé et corrigé dans main.py le 2026-09-26 (1371/2124
+    # lignes de Sint-Truiden concernées), jamais porté ici. Une colonne
+    # dynamique découverte en traitant la ligne 300 de ce run ne concernait
+    # jusqu'ici QUE les lignes 300+ (voir la boucle ci-dessus) -- les lignes
+    # 1->299 de CE run, ET toute ligne déjà écrite par un run PRÉCÉDENT,
+    # restaient vides sur cette colonne pour toujours, alors qu'on PEUT
+    # prouver qu'elles valent "N" : une colonne n'existe que parce qu'au
+    # moins une ligne déjà vue avait cette zone dans ses infos RUP ; si elle
+    # n'existait pas encore quand une ligne précédente a été écrite (elle
+    # aussi passée par ce même mécanisme), c'est la preuve que les infos RUP
+    # de cette ligne, déjà récupérées à l'époque, ne contenaient PAS cette
+    # zone. Remplit donc "N" d'abord sur TOUTES les lignes déjà écrites du
+    # fichier (pas seulement celles de ce run) pour toute colonne nouvelle,
+    # puis réécrit "O"/"N" correctement pour les lignes de CE run (déjà
+    # connues en mémoire, voir suivi_zones -- pas besoin de reproduire les 3
+    # requêtes RUP par point).
+    if suivi_zones:
+        wb = charger_classeur(excel_path)
+        ws = feuille_rup(wb)
+        index_dyn = index_colonnes_dynamiques(ws)
+        for _row, infos in suivi_zones:
+            for info in infos:
+                if info.svnaam and info.svnaam not in index_dyn:
+                    bestemming = rup_pdf.extraire_bestemming(info.svidlink) if info.svidlink else None
+                    trouver_ou_creer_colonne_dynamique(ws, index_dyn, info.svnaam, info.legende, bestemming or "")
+        colonnes_nouvelles = set(index_dyn.values()) - colonnes_dyn_avant_run
+
+        if colonnes_nouvelles:
+            n_retro = 0
+            for r in range(FIRST_DATA_ROW, trouver_premiere_ligne_vide(ws)):
+                for col in colonnes_nouvelles:
+                    if ws.cell(row=r, column=col).value is None:
+                        ws.cell(row=r, column=col, value="N")
+                        n_retro += 1
+            _logger.info(
+                "%d nouvelle(s) colonne(s) RUP dynamique(s) : %d cellule(s) rétroactivement mise(s) à "
+                "\"N\".", len(colonnes_nouvelles), n_retro,
+            )
+
+        for row, infos in suivi_zones:
+            gagnantes = {index_dyn[i.svnaam] for i in infos if i.svnaam}
+            ecrire_zones_dynamiques(ws, row, index_dyn, gagnantes)
+
+        sauvegarder(wb, excel_path)
+        _logger.info("Réconciliation RUP terminée : %d colonne(s) de zone dynamique au total.", len(index_dyn))
 
     if incomplet:
         _logger.warning(

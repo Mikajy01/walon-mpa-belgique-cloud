@@ -83,8 +83,30 @@ _TOLERANCE_APPARIEMENT = 15.0
 _RE_ESPACES = re.compile(r"\s+")
 
 
+_RE_SEPARATEUR_TIRET = re.compile(r"\s+-\s+")  # " - " SEULEMENT (espaces des 2 côtés) -- jamais le tiret
+# collé d'un mot composé néerlandais sans espace (ex. "gemeenschaps-en"), confirmé réel et à préserver.
+_RE_DEUX_POINTS = re.compile(r":\s*")
+_RE_VIRGULE = re.compile(r"\s*,\s*")
+
+
 def _normaliser(texte: str) -> str:
-    return _RE_ESPACES.sub(" ", texte.strip().lower())
+    """Normalise un nom de zone pour comparer le champ WFS `svnaam` au
+    texte réel de la légende du Grafisch Plan -- DEUX sources
+    indépendantes pour la même zone, avec de vraies divergences de
+    ponctuation confirmées en direct (dossier Avelgem
+    RUP_34003_214_00003_00001) : "wonen: met X,Y" (légende) contre
+    "wonen:met X - Y" (WFS) pour LA MÊME zone -- jamais une
+    correspondance approximative sur le CONTENU, seulement sur la
+    ponctuation/espacement. Fusionne aussi un mot immédiatement
+    dupliqué (typo réelle confirmée dans la donnée WFS brute elle-même :
+    "zone zone voor gemengde functies")."""
+    t = _RE_ESPACES.sub(" ", texte.strip().lower())
+    t = _RE_SEPARATEUR_TIRET.sub(",", t)
+    t = _RE_DEUX_POINTS.sub(": ", t)
+    t = _RE_VIRGULE.sub(",", t)
+    mots = t.split(" ")
+    mots = [m for i, m in enumerate(mots) if i == 0 or m != mots[i - 1]]
+    return " ".join(mots)
 
 
 def _url_grafisch_plan(svidlink: str) -> Optional[str]:

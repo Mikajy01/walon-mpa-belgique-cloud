@@ -141,23 +141,28 @@ def _infos_rup_parcelle(rup: WfsRupService, x: float, y: float) -> Optional[dict
     return resultat
 
 
-def _resoudre_couleur_colonne(rup_legende: RupLegendeService, legende: str) -> Tuple[Optional[str], Optional[Path]]:
+def _resoudre_couleur_colonne(rup_legende: RupLegendeService, info: InfoRup) -> Tuple[Optional[str], Optional[Path]]:
     """Couleur/motif RÉEL d'une zone -- consigne du 2026-10-08 (voir la
     conversation) : couleur unie -> fond de cellule direct ; motif
-    (hachures...) -> petite image fidèle. Essaie d'abord le style
-    officiel de la carte (`RupLegendeService`, voir son docstring),
-    puis en repli l'ancienne heuristique texte (`couleur_depuis_
+    (hachures...) -> petite image fidèle. Essaie dans l'ordre : (1) la
+    légende du VRAI document "Grafisch Plan" du dossier (couvre tous
+    les dossiers, quel que soit le contenu du champ WFS `legende`,
+    voir rup_legende_service.py) ; (2) le style officiel partagé de la
+    carte régionale (utile seulement si `legende` est un code interne
+    du style) ; (3) l'ancienne heuristique texte (`couleur_depuis_
     legende`, utile si `legende` est un mot de couleur néerlandais
-    reconnu mais absent du style -- rare). `(None, None)` si aucune des
-    deux voies n'aboutit (ex. `legende` n'est qu'un doublon du nom de
-    zone, voir la limite réelle décrite dans rup_legende_service.py) --
+    reconnu). `(None, None)` si aucune des trois voies n'aboutit --
     jamais une couleur devinée."""
-    style = rup_legende.style_pour_legende(legende)
+    style = None
+    if info.svidlink and info.svnaam:
+        style = rup_legende.couleur_depuis_grafisch_plan(info.svidlink, info.svnaam)
+    if style is None:
+        style = rup_legende.style_pour_legende(info.legende)
     if style is not None:
         if style.motif is None:
             return style.couleur_fond, None
         return None, rup_legende.generer_image_motif(style)
-    couleur = couleur_depuis_legende(legende)
+    couleur = couleur_depuis_legende(info.legende)
     return couleur, None
 
 
@@ -298,7 +303,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             for info in toutes_infos:
                 if info.svnaam and info.svnaam not in index_dyn:
                     bestemming = rup_pdf.extraire_bestemming(info.svidlink) if info.svidlink else None
-                    couleur_fond, chemin_motif = _resoudre_couleur_colonne(rup_legende, info.legende)
+                    couleur_fond, chemin_motif = _resoudre_couleur_colonne(rup_legende, info)
                     trouver_ou_creer_colonne_dynamique(
                         ws, index_dyn, info.svnaam, bestemming or "",
                         couleur_fond=couleur_fond, chemin_image_motif=chemin_motif,
@@ -351,7 +356,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             for info in infos:
                 if info.svnaam and info.svnaam not in index_dyn:
                     bestemming = rup_pdf.extraire_bestemming(info.svidlink) if info.svidlink else None
-                    couleur_fond, chemin_motif = _resoudre_couleur_colonne(rup_legende, info.legende)
+                    couleur_fond, chemin_motif = _resoudre_couleur_colonne(rup_legende, info)
                     trouver_ou_creer_colonne_dynamique(
                         ws, index_dyn, info.svnaam, bestemming or "",
                         couleur_fond=couleur_fond, chemin_image_motif=chemin_motif,

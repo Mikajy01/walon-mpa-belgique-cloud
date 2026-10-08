@@ -4,28 +4,33 @@ directement la cellule d'en-tête de la zone ; un motif complexe (croix,
 hachures...) doit recevoir une petite image fidèle au vrai motif, pas
 juste rien.
 
-Source : requête WMS standard `GetStyles` sur chacune des 3 couches RUP
-(`lu_gewrup_gv`/`lu_prorup_gv`/`lu_gemrup_gv`, même host Mercator que
-`wfs_rup_service.py`) -- renvoie le document SLD (Styled Layer
-Descriptor) utilisé par le serveur pour PEINDRE la carte elle-même :
-une règle par valeur de `legende` rencontrée
-(`<ogc:PropertyIsEqualTo><ogc:PropertyName>legende</ogc:PropertyName>
-<ogc:Literal>VLAK30000</ogc:Literal>...`), avec sa VRAIE couleur
-(`<sld:CssParameter name="fill">#FF0000</sld:CssParameter>`) et, si la
-zone est hachurée plutôt qu'unie, le nom du motif SLD standard
-(`<sld:WellKnownName>cross</sld:WellKnownName>`, etc.) -- jamais une
-couleur devinée depuis le texte libre, toujours la définition
-AUTORITATIVE réellement utilisée par le rendu de la carte.
+DEUX sources, essayées dans cet ordre :
 
-LIMITE RÉELLE confirmée en direct (dossier RUP d'Avelgem,
-`RUP_34003_214_00005_00001`) : certains dossiers RUP remplissent le
-champ `legende` avec un simple doublon du nom de la zone (ex. "zone
-voor wonen met beperkte nevenfuncties") plutôt qu'un code interne du
-style partagé (`VLAKxxxxx`) -- dans ce cas, AUCUNE règle du style ne
-filtre sur cette valeur, et aucune couleur n'est récupérable par cette
-voie (ni par l'ancienne heuristique texte de `excel_service.py`,
-reconduite ici en repli). Jamais une couleur inventée dans ce cas --
-la cellule reste simplement sans couleur, comme avant ce chantier."""
+1. **Légende du document "Grafisch Plan"** -- le PDF cartographique
+   officiel propre à CHAQUE dossier RUP (même famille de document que
+   "Stedenbouwkundige voorschriften", voir `rup_pdf_service.py`), dont
+   l'URL se déduit de `svidlink` : même base, segment
+   "Dossierstuk.SV." remplacé par "Dossierstuk.GP." -- confirmé en
+   direct (dossier Avelgem). Contrairement à la couche WMS partagée de
+   toute la Région (trop générique pour porter la couleur propre à CE
+   dossier -- confirmé en direct : le rendu WMS de la zone d'Avelgem ne
+   montre AUCUNE couleur), ce PDF contient toujours une légende propre
+   au dossier, avec un rectangle REMPLI (couleur unie) ou des TRAITS
+   (hachures) juste à gauche du nom de chaque zone -- texte et couleur
+   extraits directement de ce document, jamais devinés. Fonctionne
+   quel que soit le contenu du champ WFS `legende` (code interne OU
+   simple doublon du nom de zone), puisqu'on ne s'appuie plus du tout
+   sur ce champ ici mais sur le texte RÉEL de la légende du PDF.
+2. **Repli** : requête WMS standard `GetStyles` sur chacune des 3
+   couches RUP (`lu_gewrup_gv`/`lu_prorup_gv`/`lu_gemrup_gv`, même host
+   Mercator que `wfs_rup_service.py`) -- renvoie le document SLD
+   (Styled Layer Descriptor) utilisé par le serveur pour peindre la
+   carte régionale : une règle par valeur de `legende` rencontrée
+   (`<ogc:PropertyIsEqualTo><ogc:PropertyName>legende</ogc:PropertyName>
+   <ogc:Literal>VLAK30000</ogc:Literal>...`), utile seulement pour les
+   dossiers dont le champ `legende` est un code interne du style
+   partagé -- la voie 1 ci-dessus couvre maintenant ce cas aussi, ce
+   repli reste pour les cas où le Grafisch Plan serait indisponible."""
 
 from __future__ import annotations
 
@@ -34,6 +39,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
 
+import requests
 from PIL import Image, ImageDraw
 
 from services.exceptions import ApiServiceError
@@ -54,12 +60,108 @@ _RE_REMPLISSAGE = re.compile(r'<sld:CssParameter name="fill">#?([0-9A-Fa-f]{6})<
 
 _TAILLE_IMAGE = 32
 
+# -- Légende du PDF "Grafisch Plan" -----------------------------------------
+# Colonnes confirmées en direct (dossier Avelgem) : les rectangles/traits de
+# légende occupent x0 < 740, le texte du nom de zone x0 >= 745 -- jamais
+# chevauchés, marge de sécurité large.
+_COL_SWATCH_MAX_X = 740.0
+_COL_TEXTE_MIN_X = 745.0
+_TOLERANCE_LIGNE = 4.0
+_TOLERANCE_APPARIEMENT = 15.0
+_RE_ESPACES = re.compile(r"\s+")
+
+
+def _normaliser(texte: str) -> str:
+    return _RE_ESPACES.sub(" ", texte.strip().lower())
+
+
+def _url_grafisch_plan(svidlink: str) -> Optional[str]:
+    """Déduit l'URL du PDF "Grafisch Plan" depuis `svidlink` -- voir le
+    docstring du module. `None` si `svidlink` ne suit pas le motif
+    attendu (jamais une URL devinée au hasard)."""
+    base = svidlink.split("#", 1)[0]
+    if "Dossierstuk.SV." not in base:
+        return None
+    return base.replace("Dossierstuk.SV.", "Dossierstuk.GP.")
+
+
+def _vers_hex(couleur) -> Optional[str]:
+    """Convertit une couleur pdfplumber (niveau de gris, RGB ou CMJN,
+    chacun en flottants 0..1) en hex RRGGBB."""
+    if couleur is None:
+        return None
+    if isinstance(couleur, (int, float)):
+        v = int(round(couleur * 255))
+        return f"{v:02X}{v:02X}{v:02X}"
+    if isinstance(couleur, (tuple, list)):
+        if len(couleur) == 3:
+            r, g, b = couleur
+        elif len(couleur) == 4:
+            c, m, y, k = couleur
+            r, g, b = (1 - c) * (1 - k), (1 - m) * (1 - k), (1 - y) * (1 - k)
+        else:
+            return None
+        return f"{int(round(r * 255)):02X}{int(round(g * 255)):02X}{int(round(b * 255)):02X}"
+    return None
+
 
 @dataclass
 class StyleLegende:
     couleur_fond: str  # hex SANS '#', ex. "FF0000"
-    motif: Optional[str]  # nom SLD standard ("cross", "x", "slash", ...), None si couleur unie
+    motif: Optional[str]  # "hachure", nom SLD standard ("cross", "x", ...), None si couleur unie
     couleur_motif: Optional[str]  # hex du motif si DIFFÉRENT du fond (motif bicolore réel)
+
+
+def _style_depuis_formes(formes: list) -> Optional[StyleLegende]:
+    """Une ligne de légende est soit un rectangle REMPLI (couleur
+    unie), soit un rectangle NON rempli accompagné de traits colorés
+    (hachures) -- jamais les deux confondus, voir le docstring du
+    module. `None` si aucune forme exploitable."""
+    rect_rempli = next((f for f in formes if f.get("fill") and _vers_hex(f.get("non_stroking_color"))), None)
+    if rect_rempli is not None:
+        return StyleLegende(couleur_fond=_vers_hex(rect_rempli["non_stroking_color"]), motif=None, couleur_motif=None)
+    trait = next(
+        (f for f in formes if _vers_hex(f.get("stroking_color")) not in (None, "000000", "FFFFFF")), None,
+    )
+    if trait is not None:
+        return StyleLegende(couleur_fond="FFFFFF", motif="hachure", couleur_motif=_vers_hex(trait["stroking_color"]))
+    return None
+
+
+def _legende_grafisch_plan(pdf) -> Dict[str, StyleLegende]:
+    """Analyse la légende du Grafisch Plan : associe chaque nom de zone
+    (texte normalisé) à la couleur/motif de la forme juste à sa gauche,
+    même ligne -- voir le docstring du module et les constantes de
+    colonne ci-dessus (confirmées en direct)."""
+    resultat: Dict[str, StyleLegende] = {}
+    for page in pdf.pages:
+        mots = page.extract_words()
+        i_debut = next((w["top"] for w in mots if w["text"].lower() == "zones"), None)
+        if i_debut is None:
+            continue
+        i_fin = next((w["top"] for w in mots if w["text"].lower() == "overdrukken" and w["top"] > i_debut), None)
+        borne_fin = i_fin if i_fin is not None else i_debut + 10000
+
+        lignes_texte: Dict[float, list] = {}
+        for w in mots:
+            if not (i_debut < w["top"] < borne_fin) or w["x0"] < _COL_TEXTE_MIN_X:
+                continue
+            cle = next((k for k in lignes_texte if abs(k - w["top"]) < _TOLERANCE_LIGNE), w["top"])
+            lignes_texte.setdefault(cle, []).append(w)
+
+        formes = [
+            f for f in (list(page.rects) + list(page.lines))
+            if f.get("x0", 9999) < _COL_SWATCH_MAX_X and i_debut < f.get("top", -1) < borne_fin
+        ]
+        for top, mots_ligne in lignes_texte.items():
+            texte_norm = _normaliser(" ".join(w["text"] for w in sorted(mots_ligne, key=lambda w: w["x0"])))
+            if not texte_norm:
+                continue
+            voisines = [f for f in formes if abs(f["top"] - top) < _TOLERANCE_APPARIEMENT]
+            style = _style_depuis_formes(voisines)
+            if style is not None:
+                resultat[texte_norm] = style
+    return resultat
 
 
 class RupLegendeService:
@@ -68,6 +170,46 @@ class RupLegendeService:
         self._cache_dir = cache_dir
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._styles: Dict[str, Dict[str, StyleLegende]] = {}
+        self._legendes_grafisch_plan: Dict[str, Dict[str, StyleLegende]] = {}  # url -> {nom_zone_normalisé: style}
+
+    def couleur_depuis_grafisch_plan(self, svidlink: str, svnaam: str) -> Optional[StyleLegende]:
+        """Cherche `svnaam` dans la légende du VRAI document "Grafisch
+        Plan" du dossier (déduit de `svidlink`, voir le docstring du
+        module) -- `None` si le lien ne suit pas le motif attendu, le
+        téléchargement échoue, ou AUCUNE ligne de légende ne
+        correspond exactement (normalisée) à `svnaam` -- jamais une
+        correspondance approximative."""
+        url = _url_grafisch_plan(svidlink)
+        if url is None:
+            return None
+        chemin = self._telecharger(url)
+        if chemin is None:
+            return None
+        if url not in self._legendes_grafisch_plan:
+            try:
+                import pdfplumber
+                with pdfplumber.open(chemin) as pdf:
+                    self._legendes_grafisch_plan[url] = _legende_grafisch_plan(pdf)
+            except Exception as exc:  # noqa: BLE001 -- un Grafisch Plan illisible ne doit jamais faire échouer le traitement de la parcelle
+                _logger.warning("Légende du Grafisch Plan illisible (%s) : %s", url, exc)
+                self._legendes_grafisch_plan[url] = {}
+        return self._legendes_grafisch_plan[url].get(_normaliser(svnaam))
+
+    def _telecharger(self, url: str) -> Optional[Path]:
+        nom = re.sub(r"[^A-Za-z0-9_.-]", "_", url.rsplit("/", 1)[-1]) or "document"
+        chemin = self._cache_dir / f"{nom}.pdf"
+        if chemin.exists():
+            return chemin
+        try:
+            r = requests.get(url, timeout=30)
+            r.raise_for_status()
+        except requests.exceptions.RequestException as exc:
+            _logger.warning("Téléchargement du Grafisch Plan échoué (%s) : %s", url, exc)
+            return None
+        chemin_tmp = chemin.with_suffix(".pdf.tmp")
+        chemin_tmp.write_bytes(r.content)
+        chemin_tmp.replace(chemin)
+        return chemin
 
     def _charger_style(self, couche: str) -> Dict[str, StyleLegende]:
         if couche in self._styles:
@@ -147,7 +289,14 @@ def _dessiner_motif(draw: "ImageDraw.ImageDraw", motif: str, taille: int, couleu
     m = motif.lower()
     pas = max(taille // 4, 4)
     centres = [(x, y) for x in range(pas, taille, pas * 2) for y in range(pas, taille, pas * 2)]
-    if m in ("cross", "plus"):
+    if m == "hachure":
+        # Trait détecté dans la légende du Grafisch Plan (voir
+        # _style_depuis_formes) sans forme précise connue -- hachures
+        # diagonales simples, motif générique mais jamais une couleur
+        # inventée (celle-ci vient bien du vrai document).
+        for i in range(-taille, taille, max(pas // 2, 3)):
+            draw.line([(i, taille), (i + taille, 0)], fill=couleur, width=1)
+    elif m in ("cross", "plus"):
         for x, y in centres:
             draw.line([(x - pas // 2, y), (x + pas // 2, y)], fill=couleur, width=2)
             draw.line([(x, y - pas // 2), (x, y + pas // 2)], fill=couleur, width=2)

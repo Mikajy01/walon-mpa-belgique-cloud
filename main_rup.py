@@ -43,7 +43,7 @@ from services.cadastre_service import CadastreService
 from services.decouverte_geometrique_service import DecouverteGeometrique
 from services.decouverte_service import decouvrir_parcelles
 from services.exceptions import ApiServiceError
-from services.excel_service import sauvegarder, vers_capakey_court
+from services.excel_service import couleur_depuis_legende, sauvegarder, vers_capakey_court
 from services.excel_service_rup import (
     FIRST_DATA_ROW, charger_classeur, debut_groupe_existant, ecrire_identite, ecrire_nom_rup,
     ecrire_rup, ecrire_zones_dynamiques, etendre_groupe_nom_rup, feuille_rup,
@@ -51,6 +51,7 @@ from services.excel_service_rup import (
     trouver_ou_creer_colonne_dynamique, trouver_premiere_ligne_vide,
 )
 from services.http_client import HttpClient
+from services.rup_legende_service import RupLegendeService
 from services.rup_pdf_service import RupPdfService
 from services.wfs_rup_service import InfoRup, WfsRupService
 from services.wegenregister_service import WegenregisterService
@@ -140,6 +141,26 @@ def _infos_rup_parcelle(rup: WfsRupService, x: float, y: float) -> Optional[dict
     return resultat
 
 
+def _resoudre_couleur_colonne(rup_legende: RupLegendeService, legende: str) -> Tuple[Optional[str], Optional[Path]]:
+    """Couleur/motif RÉEL d'une zone -- consigne du 2026-10-08 (voir la
+    conversation) : couleur unie -> fond de cellule direct ; motif
+    (hachures...) -> petite image fidèle. Essaie d'abord le style
+    officiel de la carte (`RupLegendeService`, voir son docstring),
+    puis en repli l'ancienne heuristique texte (`couleur_depuis_
+    legende`, utile si `legende` est un mot de couleur néerlandais
+    reconnu mais absent du style -- rare). `(None, None)` si aucune des
+    deux voies n'aboutit (ex. `legende` n'est qu'un doublon du nom de
+    zone, voir la limite réelle décrite dans rup_legende_service.py) --
+    jamais une couleur devinée."""
+    style = rup_legende.style_pour_legende(legende)
+    if style is not None:
+        if style.motif is None:
+            return style.couleur_fond, None
+        return None, rup_legende.generer_image_motif(style)
+    couleur = couleur_depuis_legende(legende)
+    return couleur, None
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
     setup_logging(Path(args.logs_dir), debug=args.debug)
@@ -156,6 +177,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     rup = WfsRupService(http)
     rup_pdf = RupPdfService(Path(args.cache_dir) / "rup_pdf")
+    rup_legende = RupLegendeService(http, Path(args.cache_dir) / "rup_legende")
 
     state_dir = Path(args.state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -276,7 +298,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             for info in toutes_infos:
                 if info.svnaam and info.svnaam not in index_dyn:
                     bestemming = rup_pdf.extraire_bestemming(info.svidlink) if info.svidlink else None
-                    trouver_ou_creer_colonne_dynamique(ws, index_dyn, info.svnaam, info.legende, bestemming or "")
+                    couleur_fond, chemin_motif = _resoudre_couleur_colonne(rup_legende, info.legende)
+                    trouver_ou_creer_colonne_dynamique(
+                        ws, index_dyn, info.svnaam, bestemming or "",
+                        couleur_fond=couleur_fond, chemin_image_motif=chemin_motif,
+                    )
             gagnantes = {index_dyn[i.svnaam] for i in toutes_infos if i.svnaam}
             ecrire_zones_dynamiques(ws, row, index_dyn, gagnantes)
             suivi_zones.append((row, toutes_infos))
@@ -325,7 +351,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             for info in infos:
                 if info.svnaam and info.svnaam not in index_dyn:
                     bestemming = rup_pdf.extraire_bestemming(info.svidlink) if info.svidlink else None
-                    trouver_ou_creer_colonne_dynamique(ws, index_dyn, info.svnaam, info.legende, bestemming or "")
+                    couleur_fond, chemin_motif = _resoudre_couleur_colonne(rup_legende, info.legende)
+                    trouver_ou_creer_colonne_dynamique(
+                        ws, index_dyn, info.svnaam, bestemming or "",
+                        couleur_fond=couleur_fond, chemin_image_motif=chemin_motif,
+                    )
         colonnes_nouvelles = set(index_dyn.values()) - colonnes_dyn_avant_run
 
         if colonnes_nouvelles:

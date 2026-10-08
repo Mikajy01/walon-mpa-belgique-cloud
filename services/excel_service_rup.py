@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Dict, Optional, Set, Tuple
 
 import openpyxl
+from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Alignment, PatternFill
 from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
@@ -175,24 +176,35 @@ def index_colonnes_dynamiques(ws: Worksheet) -> Dict[str, int]:
 
 
 def trouver_ou_creer_colonne_dynamique(
-    ws: Worksheet, index: Dict[str, int], svnaam: str, legende: str, bestemming: str,
+    ws: Worksheet, index: Dict[str, int], svnaam: str, bestemming: str,
+    *, couleur_fond: Optional[str] = None, chemin_image_motif: Optional[Path] = None,
 ) -> int:
     """Renvoie l'index de colonne pour `svnaam`, la créant si besoin --
     en-tête (ligne 2) + texte légal complet `bestemming` (ligne 3,
-    extrait du PDF via `rup_pdf_service.py`, voir main_rup.py) + couleur
-    de fond best-effort tirée de `legende`. Met `index` à jour en
-    place. N'écrase JAMAIS `bestemming` si la colonne existe déjà
-    (toujours le même texte pour un même `svnaam`, premier arrivé
-    suffit -- évite de retélécharger/réécrire inutilement)."""
+    extrait du PDF via `rup_pdf_service.py`, voir main_rup.py).
+
+    `couleur_fond` (hex SANS '#') et `chemin_image_motif` (chemin d'une
+    petite image PNG) sont mutuellement exclusifs -- voir
+    `services/rup_legende_service.py` et son appelant (main_rup.py) :
+    couleur unie -> fond de cellule direct ; motif (hachures...) ->
+    petite image fidèle au vrai motif officiel, ancrée sur la cellule.
+    Aucun des deux si la couleur réelle n'a pas pu être déterminée
+    (jamais de couleur devinée). Met `index` à jour en place. N'écrase
+    JAMAIS `bestemming` si la colonne existe déjà (toujours le même
+    texte pour un même `svnaam`, premier arrivé suffit -- évite de
+    retélécharger/réécrire inutilement)."""
     if svnaam in index:
         return index[svnaam]
     nouvelle_col = max([DYNAMIC_RUP_FIRST_COL - 1, *index.values()]) + 1
     cell = ws.cell(row=DYNAMIC_RUP_HEADER_ROW, column=nouvelle_col, value=svnaam)
     cell.font = cell.font.copy(bold=True)
     cell.alignment = Alignment(wrap_text=True, vertical="center")
-    couleur = couleur_depuis_legende(legende)
-    if couleur:
-        cell.fill = PatternFill(start_color=couleur, end_color=couleur, fill_type="solid")
+    if couleur_fond:
+        cell.fill = PatternFill(start_color=couleur_fond, end_color=couleur_fond, fill_type="solid")
+    elif chemin_image_motif is not None:
+        image = XLImage(str(chemin_image_motif))
+        image.width = image.height = 18
+        ws.add_image(image, cell.coordinate)
     texte_cell = ws.cell(row=DYNAMIC_RUP_BESTEMMING_ROW, column=nouvelle_col, value=(bestemming or "/"))
     texte_cell.alignment = Alignment(wrap_text=True, vertical="top")
     index[svnaam] = nouvelle_col

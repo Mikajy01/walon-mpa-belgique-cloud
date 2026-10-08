@@ -64,8 +64,20 @@ _TAILLE_IMAGE = 32
 # Colonnes confirmées en direct (dossier Avelgem) : les rectangles/traits de
 # légende occupent x0 < 740, le texte du nom de zone x0 >= 745 -- jamais
 # chevauchés, marge de sécurité large.
+#
+# BUG RÉEL trouvé le 2026-10-08 (zone "perimeter woonuitbreidingsgebied",
+# Avelgem) : sans borne HAUTE sur la colonne de texte, des fragments de
+# lettres isolées de labels de rue tournés (texte vertical le long d'une
+# route sur la carte, x≈2041-2050 -- confirmé en direct) tombaient dans
+# la même bande verticale que la légende (x≥745 sans limite) et se
+# mélangeaient au nom de zone ("perimeter woonuitbreidingsgebied a", "at",
+# "t r"...), cassant la correspondance exacte. `_COL_TEXTE_MAX_X` borne la
+# colonne de texte à la largeur de la page de garde SEULE (le cadre noir
+# de la carte démarre à x=1218.7, confirmé en direct) -- jamais de
+# fragment de la carte elle-même ne peut plus s'y glisser.
 _COL_SWATCH_MAX_X = 740.0
 _COL_TEXTE_MIN_X = 745.0
+_COL_TEXTE_MAX_X = 1200.0
 _TOLERANCE_LIGNE = 4.0
 _TOLERANCE_APPARIEMENT = 15.0
 _RE_ESPACES = re.compile(r"\s+")
@@ -112,16 +124,22 @@ class StyleLegende:
     couleur_motif: Optional[str]  # hex du motif si DIFFÉRENT du fond (motif bicolore réel)
 
 
-def _style_depuis_formes(formes: list) -> Optional[StyleLegende]:
+def _style_depuis_formes(rects: list, lignes: list) -> Optional[StyleLegende]:
     """Une ligne de légende est soit un rectangle REMPLI (couleur
     unie), soit un rectangle NON rempli accompagné de traits colorés
     (hachures) -- jamais les deux confondus, voir le docstring du
-    module. `None` si aucune forme exploitable."""
-    rect_rempli = next((f for f in formes if f.get("fill") and _vers_hex(f.get("non_stroking_color"))), None)
+    module. Pour les hachures, les VRAIS traits du motif (`lignes`)
+    priment sur la couleur du simple contour de la case (`rects` avec
+    `fill=False`) -- bug réel trouvé le 2026-10-08 (zone "perimeter
+    woonuitbreidingsgebied", Avelgem) : sans cette priorité, la couleur
+    grise du cadre de la case (jamais celle du motif réel, toujours
+    rouge sur ce document) était choisie en premier. `None` si aucune
+    forme exploitable."""
+    rect_rempli = next((f for f in rects if f.get("fill") and _vers_hex(f.get("non_stroking_color"))), None)
     if rect_rempli is not None:
         return StyleLegende(couleur_fond=_vers_hex(rect_rempli["non_stroking_color"]), motif=None, couleur_motif=None)
     trait = next(
-        (f for f in formes if _vers_hex(f.get("stroking_color")) not in (None, "000000", "FFFFFF")), None,
+        (f for f in lignes + rects if _vers_hex(f.get("stroking_color")) not in (None, "000000", "FFFFFF")), None,
     )
     if trait is not None:
         return StyleLegende(couleur_fond="FFFFFF", motif="hachure", couleur_motif=_vers_hex(trait["stroking_color"]))
@@ -144,21 +162,23 @@ def _legende_grafisch_plan(pdf) -> Dict[str, StyleLegende]:
 
         lignes_texte: Dict[float, list] = {}
         for w in mots:
-            if not (i_debut < w["top"] < borne_fin) or w["x0"] < _COL_TEXTE_MIN_X:
+            if not (i_debut < w["top"] < borne_fin) or not (_COL_TEXTE_MIN_X <= w["x0"] < _COL_TEXTE_MAX_X):
                 continue
             cle = next((k for k in lignes_texte if abs(k - w["top"]) < _TOLERANCE_LIGNE), w["top"])
             lignes_texte.setdefault(cle, []).append(w)
 
-        formes = [
-            f for f in (list(page.rects) + list(page.lines))
-            if f.get("x0", 9999) < _COL_SWATCH_MAX_X and i_debut < f.get("top", -1) < borne_fin
-        ]
+        def _dans_colonne_swatch(f: dict) -> bool:
+            return f.get("x0", 9999) < _COL_SWATCH_MAX_X and i_debut < f.get("top", -1) < borne_fin
+
+        rects_legende = [f for f in page.rects if _dans_colonne_swatch(f)]
+        lignes_legende = [f for f in page.lines if _dans_colonne_swatch(f)]
         for top, mots_ligne in lignes_texte.items():
             texte_norm = _normaliser(" ".join(w["text"] for w in sorted(mots_ligne, key=lambda w: w["x0"])))
             if not texte_norm:
                 continue
-            voisines = [f for f in formes if abs(f["top"] - top) < _TOLERANCE_APPARIEMENT]
-            style = _style_depuis_formes(voisines)
+            rects_voisins = [f for f in rects_legende if abs(f["top"] - top) < _TOLERANCE_APPARIEMENT]
+            lignes_voisines = [f for f in lignes_legende if abs(f["top"] - top) < _TOLERANCE_APPARIEMENT]
+            style = _style_depuis_formes(rects_voisins, lignes_voisines)
             if style is not None:
                 resultat[texte_norm] = style
     return resultat

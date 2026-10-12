@@ -4,3 +4,4 @@ tenacity>=8.2
 pyproj>=3.6
 pdfplumber>=0.11
 Pillow>=10.0
+pytesseract>=0.3.10

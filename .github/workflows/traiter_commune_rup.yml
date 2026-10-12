@@ -62,6 +62,16 @@ jobs:
       - name: Installer les dépendances
         run: pip install -r requirements.txt
 
+      # Tesseract OCR (+ modèle néerlandais) -- repli pour les dossiers
+      # RUP dont le "Grafisch Plan" est une image scannée pure, sans
+      # AUCUN texte ni vecteur extractible (confirmé en direct sur des
+      # dossiers de niveau PROVINCE, ex. Boom) -- voir
+      # services/rup_legende_service.py::_legende_depuis_image. Jamais
+      # utilisé pour un document normal (texte/vecteur), donc n'ajoute
+      # aucun coût aux runs qui n'en ont pas besoin.
+      - name: Installer Tesseract OCR (néerlandais)
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-nld
+
       # Cache HTTP (WFS/registre d'adresses) + cache PDF (prescriptions
       # urbanistiques déjà téléchargées, voir rup_pdf_service.py) --
       # PERFORMANCE uniquement, jamais une source de vérité, jamais

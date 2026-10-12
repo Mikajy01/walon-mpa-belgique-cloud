@@ -4,7 +4,7 @@ directement la cellule d'en-tête de la zone ; un motif complexe (croix,
 hachures...) doit recevoir une petite image fidèle au vrai motif, pas
 juste rien.
 
-DEUX sources, essayées dans cet ordre :
+TROIS sources, essayées dans cet ordre :
 
 1. **Légende du document "Grafisch Plan"** -- le PDF cartographique
    officiel propre à CHAQUE dossier RUP (même famille de document que
@@ -21,7 +21,17 @@ DEUX sources, essayées dans cet ordre :
    quel que soit le contenu du champ WFS `legende` (code interne OU
    simple doublon du nom de zone), puisqu'on ne s'appuie plus du tout
    sur ce champ ici mais sur le texte RÉEL de la légende du PDF.
-2. **Repli** : requête WMS standard `GetStyles` sur chacune des 3
+2. **OCR de la légende** -- certains dossiers (confirmé en direct :
+   TOUS les dossiers de niveau PROVINCE rencontrés jusqu'ici, Boom et
+   Glabbeek) publient leur Grafisch Plan comme une image SCANNÉE pure
+   (0 caractère, 0 courbe extractible) -- la voie 1 ne peut alors rien
+   lire du tout. Repli : rendu de la page en image, reconnaissance de
+   texte (Tesseract, néerlandais) pour retrouver le nom de chaque zone
+   et sa position, puis échantillonnage de la VRAIE couleur des pixels
+   de la pastille juste à sa gauche -- jamais une couleur inventée,
+   toujours lue sur l'image réelle, au prix d'une fiabilité un peu
+   moindre que la voie 1 (dépend de la qualité de l'OCR).
+3. **Repli final** : requête WMS standard `GetStyles` sur chacune des 3
    couches RUP (`lu_gewrup_gv`/`lu_prorup_gv`/`lu_gemrup_gv`, même host
    Mercator que `wfs_rup_service.py`) -- renvoie le document SLD
    (Styled Layer Descriptor) utilisé par le serveur pour peindre la
@@ -29,8 +39,8 @@ DEUX sources, essayées dans cet ordre :
    (`<ogc:PropertyIsEqualTo><ogc:PropertyName>legende</ogc:PropertyName>
    <ogc:Literal>VLAK30000</ogc:Literal>...`), utile seulement pour les
    dossiers dont le champ `legende` est un code interne du style
-   partagé -- la voie 1 ci-dessus couvre maintenant ce cas aussi, ce
-   repli reste pour les cas où le Grafisch Plan serait indisponible."""
+   partagé -- les voies 1 et 2 couvrent maintenant la plupart des cas,
+   ce repli reste pour les documents totalement indisponibles."""
 
 from __future__ import annotations
 
@@ -182,10 +192,53 @@ def _style_depuis_formes(rects: list, lignes: list) -> Optional[StyleLegende]:
     return None
 
 
+_RE_CID = re.compile(r"\(cid:\d+\)")
+_MARGE_RECADRAGE_OCR = 1.5  # pt, petite marge autour du mot pour ne pas couper son contour
+_RESOLUTION_OCR_MOT = 400  # dpi -- un seul mot, image minuscule, haute résolution sans coût réel
+
+
+def _corriger_glyphe_illisible(page, mot: dict) -> str:
+    """Un glyphe que la table ToUnicode de la police intégrée ne sait
+    pas décoder ressort en texte sous la forme littérale "(cid:46)" --
+    bug réel trouvé le 2026-10-12 (dossier Glabbeek, ligature "ti" dans
+    "recreatie" -- confirmé en direct : le glyphe s'AFFICHE
+    correctement, seule sa table de décodage est incomplète, un défaut
+    du PDF source, pas de l'extraction). Repli OCR CIBLÉ uniquement sur
+    CE mot (recadrage minuscule, haute résolution) -- jamais sur toute
+    la page, pour rester rapide et ne risquer aucune confusion avec un
+    autre texte voisin. Renvoie le texte original si aucun `(cid:`
+    n'est présent (immense majorité des mots, aucun coût OCR) ou si
+    l'OCR échoue."""
+    texte = mot["text"]
+    if "(cid:" not in texte:
+        return texte
+    try:
+        import pytesseract
+        recadre = page.crop((
+            mot["x0"] - _MARGE_RECADRAGE_OCR, mot["top"] - _MARGE_RECADRAGE_OCR,
+            mot["x1"] + _MARGE_RECADRAGE_OCR, mot["bottom"] + _MARGE_RECADRAGE_OCR,
+        ))
+        img = recadre.to_image(resolution=_RESOLUTION_OCR_MOT).original.convert("RGB")
+        texte_ocr = pytesseract.image_to_string(img, lang="nld", config="--psm 7").strip()
+    except Exception as exc:  # noqa: BLE001 -- un OCR indisponible/raté ne doit jamais faire échouer le traitement de la parcelle
+        _logger.warning("OCR du glyphe illisible (%r) échoué : %s", texte, exc)
+        return texte
+    return texte_ocr if texte_ocr else texte
+
+
 _MOTS_DEBUT_LEGENDE = ("zones", "legende")
 _MOTS_FIN_LEGENDE = ("overdrukken",)
 _HAUTEUR_MAX_SANS_FIN = 500.0  # si aucun titre de fin trouvé, borne raisonnable -- jamais la page entière
 _MARGE_COLONNE_SWATCH = 5.0
+_RE_PONCTUATION_FINALE = re.compile(r"[:\s]+$")
+
+
+def _mot_correspond(texte: str, mots_cibles: tuple) -> bool:
+    """Compare un mot de titre en ignorant une ponctuation finale
+    collée -- bug réel trouvé le 2026-10-12 (document scanné d'un
+    dossier RUP de niveau province, OCR) : le mot reconnu est
+    "Legende:" (deux-points collé), jamais égal à "legende" seul."""
+    return _RE_PONCTUATION_FINALE.sub("", texte.strip().lower()) in mots_cibles
 _LARGEUR_MAX_COLONNE_SWATCH = 150.0  # garde-fou : des pastilles de légende sont toujours étroites et alignées
 
 
@@ -213,11 +266,11 @@ def _legende_grafisch_plan(pdf) -> Dict[str, StyleLegende]:
     for page_brute in pdf.pages:
         page = page_brute.dedupe_chars()
         mots = page.extract_words()
-        debut = next((w for w in mots if w["text"].lower() in _MOTS_DEBUT_LEGENDE), None)
+        debut = next((w for w in mots if _mot_correspond(w["text"], _MOTS_DEBUT_LEGENDE)), None)
         if debut is None:
             continue
         i_debut = debut["top"]
-        fin = next((w for w in mots if w["text"].lower() in _MOTS_FIN_LEGENDE and w["top"] > i_debut), None)
+        fin = next((w for w in mots if _mot_correspond(w["text"], _MOTS_FIN_LEGENDE) and w["top"] > i_debut), None)
         borne_fin = fin["top"] if fin is not None else i_debut + _HAUTEUR_MAX_SANS_FIN
 
         rects_bande = [f for f in page.rects if i_debut < f.get("top", -1) < borne_fin]
@@ -270,7 +323,8 @@ def _legende_grafisch_plan(pdf) -> Dict[str, StyleLegende]:
         lignes_bande_col = [f for f in lignes_bande if col_swatch_min <= f["x0"] < col_swatch_max]
 
         for top, mots_ligne in lignes_texte.items():
-            texte_norm = _normaliser(" ".join(w["text"] for w in sorted(mots_ligne, key=lambda w: w["x0"])))
+            mots_tries = sorted(mots_ligne, key=lambda w: w["x0"])
+            texte_norm = _normaliser(" ".join(_corriger_glyphe_illisible(page, w) for w in mots_tries))
             if not texte_norm:
                 continue
             rects_voisins = [f for f in rects_bande_col if abs(f["top"] - top) < _TOLERANCE_APPARIEMENT]
@@ -278,6 +332,115 @@ def _legende_grafisch_plan(pdf) -> Dict[str, StyleLegende]:
             style = _style_depuis_formes(rects_voisins, lignes_voisines)
             if style is not None:
                 resultat[texte_norm] = style
+    return resultat
+
+
+# -- Repli OCR (documents sans AUCUN texte/vecteur exploitable) -------------
+# Confirmé en direct : TOUS les dossiers de niveau PROVINCE rencontrés
+# jusqu'ici (Boom, Glabbeek) publient leur Grafisch Plan comme une image
+# scannée pure (0 caractère, 0 courbe) -- `_legende_grafisch_plan`
+# ci-dessus ne peut alors rien extraire du tout, quel que soit le réglage.
+_RESOLUTION_OCR = 200  # dpi -- suffisant pour une légende texte, sans fichier demesure
+_TOLERANCE_LIGNE_OCR = 15  # en pixels (image, pas en points PDF)
+_LARGEUR_RECHERCHE_PASTILLE_OCR = 250  # px, generreux, a gauche du texte
+_MARGE_PASTILLE_OCR = 15  # px, ecart mini entre la zone de recherche et le texte
+
+
+_SEUIL_QUASI_BLANC = 245  # un scan contient du bruit de compression proche du blanc (ex. 254,254,254)
+# -- compter les couleurs EXACTES les confond avec le vrai fond blanc plutôt
+# que de les exclure toutes les deux ; vu en direct (dossier Boom, zone
+# "natuurgebied") : la vraie pastille verte était bien présente mais éclatée
+# sur une dizaine de nuances très proches (anti-crénelage du scan), chacune
+# moins fréquente que le bruit quasi-blanc à elle seule.
+_PAS_QUANTIFICATION = 24  # regroupe les nuances proches avant de compter le mode
+
+
+def _couleur_dominante_pixels(img, x0: int, x1: int, y0: int, y1: int) -> Optional[str]:
+    """Couleur hex la plus représentative du rectangle de pixels donné
+    -- exclut le blanc ET le quasi-blanc (fond/bruit de scan), puis
+    regroupe les nuances proches (anti-crénelage) avant de compter la
+    plus fréquente, sinon de nombreuses nuances presque identiques de
+    la VRAIE pastille se divisent les voix face au bruit de fond.
+    `None` si rien d'exploitable (zone entièrement blanche -- pas de
+    pastille trouvée là)."""
+    compte: Counter = Counter()
+    echantillon: Dict[tuple, tuple] = {}
+    for x in range(max(x0, 0), max(x1, 0), 2):
+        for y in range(max(y0, 0), max(y1, 0), 2):
+            try:
+                p = img.getpixel((x, y))
+            except IndexError:
+                continue
+            r, g, b = p[:3]
+            if r >= _SEUIL_QUASI_BLANC and g >= _SEUIL_QUASI_BLANC and b >= _SEUIL_QUASI_BLANC:
+                continue
+            cle = (r // _PAS_QUANTIFICATION, g // _PAS_QUANTIFICATION, b // _PAS_QUANTIFICATION)
+            compte[cle] += 1
+            echantillon.setdefault(cle, (r, g, b))
+    if not compte:
+        return None
+    cle_principale, _n = compte.most_common(1)[0]
+    r, g, b = echantillon[cle_principale]
+    return f"{r:02X}{g:02X}{b:02X}"
+
+
+def _legende_depuis_image(page) -> Dict[str, StyleLegende]:
+    """Repli OCR : reconnaissance de texte (Tesseract, néerlandais) sur
+    le rendu de la page, puis couleur RÉELLE échantillonnée sur les
+    pixels de la pastille juste à gauche de chaque nom de zone -- voir
+    le docstring du module. Importe `pytesseract` localement (dépendance
+    lourde, chargée seulement quand vraiment nécessaire -- un document
+    normal avec du texte/vecteur ne passe jamais par ici)."""
+    import pytesseract
+
+    resultat: Dict[str, StyleLegende] = {}
+    im = page.to_image(resolution=_RESOLUTION_OCR)
+    img = im.original.convert("RGB")
+    try:
+        data = pytesseract.image_to_data(img, lang="nld", output_type=pytesseract.Output.DICT)
+    except Exception as exc:  # noqa: BLE001 -- un OCR indisponible/raté ne doit jamais faire échouer le traitement de la parcelle
+        _logger.warning("OCR de la légende échoué : %s", exc)
+        return resultat
+
+    mots = []
+    for i in range(len(data["text"])):
+        texte = data["text"][i].strip()
+        if texte:
+            mots.append({
+                "text": texte, "x0": data["left"][i], "top": data["top"][i],
+                "x1": data["left"][i] + data["width"][i], "bottom": data["top"][i] + data["height"][i],
+            })
+
+    occurrences_legende = [w for w in mots if _mot_correspond(w["text"], _MOTS_DEBUT_LEGENDE)]
+    if not occurrences_legende:
+        return resultat
+    i_debut = occurrences_legende[0]["top"]
+    suivante = next((w["top"] for w in occurrences_legende[1:]), None)
+    borne_fin = suivante if suivante is not None else i_debut + img.height * 0.4
+
+    lignes_texte: Dict[float, list] = {}
+    for w in mots:
+        if not (i_debut < w["top"] < borne_fin):
+            continue
+        cle = next((k for k in lignes_texte if abs(k - w["top"]) < _TOLERANCE_LIGNE_OCR), w["top"])
+        lignes_texte.setdefault(cle, []).append(w)
+
+    for _top, mots_ligne in lignes_texte.items():
+        mots_tries = sorted(mots_ligne, key=lambda w: w["x0"])
+        texte_norm = _normaliser(" ".join(w["text"] for w in mots_tries))
+        if not texte_norm:
+            continue
+        premier = mots_tries[0]
+        y_centre = (premier["top"] + premier["bottom"]) / 2
+        hauteur = max(premier["bottom"] - premier["top"], 10)
+        couleur = _couleur_dominante_pixels(
+            img,
+            premier["x0"] - _LARGEUR_RECHERCHE_PASTILLE_OCR,
+            premier["x0"] - _MARGE_PASTILLE_OCR,
+            int(y_centre - hauteur * 0.6), int(y_centre + hauteur * 0.6),
+        )
+        if couleur is not None:
+            resultat[texte_norm] = StyleLegende(couleur_fond=couleur, motif=None, couleur_motif=None)
     return resultat
 
 
@@ -303,14 +466,31 @@ class RupLegendeService:
         if chemin is None:
             return None
         if url not in self._legendes_grafisch_plan:
-            try:
-                import pdfplumber
-                with pdfplumber.open(chemin) as pdf:
-                    self._legendes_grafisch_plan[url] = _legende_grafisch_plan(pdf)
-            except Exception as exc:  # noqa: BLE001 -- un Grafisch Plan illisible ne doit jamais faire échouer le traitement de la parcelle
-                _logger.warning("Légende du Grafisch Plan illisible (%s) : %s", url, exc)
-                self._legendes_grafisch_plan[url] = {}
+            self._legendes_grafisch_plan[url] = self._lire_legende(chemin, url)
         return self._legendes_grafisch_plan[url].get(_normaliser(svnaam))
+
+    def _lire_legende(self, chemin: Path, url: str) -> Dict[str, StyleLegende]:
+        """Texte/vecteur d'abord (`_legende_grafisch_plan`) ; repli OCR
+        (`_legende_depuis_image`) SEULEMENT si rien n'a été trouvé --
+        confirmé en direct : les dossiers de niveau PROVINCE publient un
+        Grafisch Plan sans AUCUN caractère ni courbe extractible (image
+        scannée pure), où la voie texte/vecteur ne peut structurellement
+        rien lire, quel que soit son réglage."""
+        try:
+            import pdfplumber
+            with pdfplumber.open(chemin) as pdf:
+                legende = _legende_grafisch_plan(pdf)
+                if legende:
+                    return legende
+                _logger.info("Légende vectorielle vide (%s) -- tentative par OCR.", url)
+                for page in pdf.pages:
+                    legende_ocr = _legende_depuis_image(page)
+                    if legende_ocr:
+                        return legende_ocr
+                return {}
+        except Exception as exc:  # noqa: BLE001 -- un Grafisch Plan illisible ne doit jamais faire échouer le traitement de la parcelle
+            _logger.warning("Légende du Grafisch Plan illisible (%s) : %s", url, exc)
+            return {}
 
     def _telecharger(self, url: str) -> Optional[Path]:
         nom = re.sub(r"[^A-Za-z0-9_.-]", "_", url.rsplit("/", 1)[-1]) or "document"

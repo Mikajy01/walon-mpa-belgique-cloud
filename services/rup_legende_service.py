@@ -327,8 +327,27 @@ def _legende_grafisch_plan(pdf) -> Dict[str, StyleLegende]:
             texte_norm = _normaliser(" ".join(_corriger_glyphe_illisible(page, w) for w in mots_tries))
             if not texte_norm:
                 continue
-            rects_voisins = [f for f in rects_bande_col if abs(f["top"] - top) < _TOLERANCE_APPARIEMENT]
-            lignes_voisines = [f for f in lignes_bande_col if abs(f["top"] - top) < _TOLERANCE_APPARIEMENT]
+            # Triées par proximité verticale (pas l'ordre de dessin dans le
+            # PDF) -- bug réel trouvé le 2026-10-12 (dossiers Glabbeek,
+            # légendes à lignes compactes) : quand deux lignes de légende
+            # consécutives sont assez proches pour que leurs pastilles
+            # tombent TOUTES LES DEUX dans la fenêtre de tolérance d'une
+            # même ligne de texte, `_style_depuis_formes` (qui prend le
+            # premier élément exploitable) retombait systématiquement sur
+            # la pastille de la ligne précédente (apparue avant dans
+            # `rects_bande_col`, par ordre de dessin haut->bas), jamais la
+            # bonne -- confirmé en direct : "zone voor wonen" récupérait la
+            # couleur de "zone voor speelbos" juste au-dessus, et
+            # "zone voor gemeenschapsvoorzieningen"/"zone voor wegenis"
+            # récupéraient toutes deux la couleur de "zone voor recreatie".
+            rects_voisins = sorted(
+                (f for f in rects_bande_col if abs(f["top"] - top) < _TOLERANCE_APPARIEMENT),
+                key=lambda f: abs(f["top"] - top),
+            )
+            lignes_voisines = sorted(
+                (f for f in lignes_bande_col if abs(f["top"] - top) < _TOLERANCE_APPARIEMENT),
+                key=lambda f: abs(f["top"] - top),
+            )
             style = _style_depuis_formes(rects_voisins, lignes_voisines)
             if style is not None:
                 resultat[texte_norm] = style
